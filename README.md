@@ -38,8 +38,8 @@ Fork 仓库，在 GitHub Actions 配置：
 
 ## 功能与边界
 
-- QuickJS 支持 async/await、常用 Buffer/文本编码及同步工具函数回调；有独立执行时限、内存和栈限制。
-- 脚本宿主回调暂不支持 async callback，不支持 Node `require`、本地文件和本地代理内核。
+- QuickJS 支持 async/await、Buffer、lodash、URL、Fetch、Web Streams、Web Crypto 和异步宿主回调；每次执行有独立的时限、内存、栈和资源数量限制。
+- `require` 和动态 `import` 仅支持 lodash、buffer、url、crypto、events、stream/web 白名单，不支持本地文件、任意 npm 包或本地代理内核。
 - DNS 可使用上游 DoH；不提供任意 UDP DNS。
 - GeoIP 从配置的 MMDB URL 按需加载，数据库和订阅数据由单库持久化；加载失败会重试，不替换有效的旧 reader。
 - `SUB_STORE_PUSH_SERVICE` 支持 Shoutrrr URL，也支持 HTTP URL 中的 `[推送标题]`、`[推送内容]` 占位符。通知使用 fetch，不支持 GET/HEAD 请求体。

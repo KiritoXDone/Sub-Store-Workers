@@ -50,7 +50,7 @@ jobs:
 
       - name: Test runtime and release selection
         run: |
-          node --test scripts/test-release-selection.mjs scripts/test-substore-transform.mjs scripts/test-resource-cache.mjs scripts/test-share.mjs scripts/test-quickjs-engine.mjs scripts/test-substore-engine.mjs scripts/test-shoutrrr-notification.mjs scripts/test-single-store-routing.mjs scripts/test-single-store-storage.mjs
+          node --test packages/quickjs-capabilities/tests.mjs scripts/test-release-selection.mjs scripts/test-substore-transform.mjs scripts/test-resource-cache.mjs scripts/test-share.mjs scripts/test-quickjs-engine.mjs scripts/test-substore-engine.mjs scripts/test-shoutrrr-notification.mjs scripts/test-single-store-routing.mjs scripts/test-single-store-storage.mjs
 
       - name: Configure wrangler.toml
         run: |
@@ -81,6 +81,7 @@ jobs:
       - name: Run API tests
         run: |
           node scripts/test-single-store.mjs http://127.0.0.1:3000
+          node scripts/test-worker-capabilities.mjs http://127.0.0.1:3000
           curl -fsS http://127.0.0.1:3000/ | cmp - public/frontend/index.html
 
       - name: Stop dev server

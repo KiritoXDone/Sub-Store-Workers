@@ -39,13 +39,13 @@ test('releases the runtime on compile, execution and timeout failures', async ()
     runtimeClosed();
 });
 
-test('bridges lodash callbacks and preserves callback errors', async () => {
+test('supports lodash and host callbacks with error propagation', async () => {
     const lodash = {
         map: (values, iteratee) => values.map(iteratee),
         applyNested: (values, iteratees) => values.map(iteratees[0]),
     };
-    const script = 'function operator(input) { return [lodash.map(input, p => p.name + $arguments.suffix), lodash.applyNested(input, [p => p.name])] }';
-    assert.deepEqual(await makeOperator(script, { lodash, $arguments: { suffix: '!' } })([{ name: 'a' }, { name: 'b' }]), [['a!', 'b!'], ['a', 'b']]);
+    const script = 'function operator(input) { return [lodash.map(input, p => p.name + $arguments.suffix), ProxyUtils.applyNested(input, [p => p.name])] }';
+    assert.deepEqual(await makeOperator(script, { lodash, ProxyUtils: lodash, $arguments: { suffix: '!' } })([{ name: 'a' }, { name: 'b' }]), [['a!', 'b!'], ['a', 'b']]);
     const mutating = 'function operator(input) { const result = lodash.map(input, p => { p.name += "!"; return p; }); return [input[0].name, result[0] === input[0]]; }';
     assert.deepEqual(await makeOperator(mutating, { lodash })([{ name: 'a' }]), ['a!', true]);
     runtimeClosed();
@@ -53,13 +53,15 @@ test('bridges lodash callbacks and preserves callback errors', async () => {
     runtimeClosed();
 });
 
-test('blocks shared lodash mixin through its name and host aliases', async () => {
+test('keeps sandbox lodash mixins isolated and blocks shared host aliases', async () => {
     const requireBackend = createRequire(new URL('../sub-store/backend/package.json', import.meta.url));
     const lodash = requireBackend('lodash');
     const originalMap = lodash.map;
     const ProxyUtils = { alias: lodash.mixin };
+    const local = await makeOperator('function operator() { lodash.mixin({ map: () => ["altered"] }); return lodash.map([1]); }', { lodash })([]);
+    assert.deepEqual(local, ['altered']);
+    assert.equal(lodash.map, originalMap);
     for (const call of [
-        'lodash.mixin({ map: () => ["altered"] })',
         'ProxyUtils.alias({ map: () => ["altered"] })',
         '__hostCall("lodash.mixin", [{ map: () => ["altered"] }])',
     ]) {
@@ -72,16 +74,16 @@ test('blocks shared lodash mixin through its name and host aliases', async () =>
 
 test('round trips UTF-8 and binary data including typed-array offsets', async () => {
     const body = new Uint8Array([0, 0xe4, 0xb8, 0xad, 0xe6, 0x96, 0x87, 0]).buffer;
-    const lodash = { echo: (value) => value };
+    const ProxyUtils = { echo: (value) => value };
     const $substore = { env: {}, http: { get: async () => ({ body }) } };
     const script = `async function operator() {
         const response = await $substore.http.get('https://example.invalid');
         const part = new Uint8Array(response.body, 1, 6);
-        const echo = lodash.echo({ bytes: part });
+        const echo = ProxyUtils.echo({ bytes: part });
         return [Buffer.from(part).toString(), Buffer.from(echo.bytes).toString('base64'),
             Buffer.from([0, 255, 16]).toString('hex'), new TextDecoder().decode(new TextEncoder().encode('😀'))];
     }`;
-    assert.deepEqual(await makeOperator(script, { $substore, lodash })([]), ['中文', '5Lit5paH', '00ff10', '😀']);
+    assert.deepEqual(await makeOperator(script, { $substore, ProxyUtils })([]), ['中文', '5Lit5paH', '00ff10', '😀']);
     runtimeClosed();
 });
 
@@ -107,9 +109,9 @@ test('aborts late host work and ignores its completion after disposal', async ()
     runtimeClosed();
     rejectLate(new Error('late rejection'));
     await Promise.resolve();
-    const lodash = { defer: (callback) => { lateCallback = callback; } };
-    await makeOperator('function operator() { lodash.defer(() => { throw new Error("must not run") }); }', { lodash })([]);
-    assert.equal(lateCallback(), undefined);
+    const ProxyUtils = { defer: (callback) => { lateCallback = callback; } };
+    await makeOperator('function operator() { ProxyUtils.defer(() => { throw new Error("must not run") }); }', { ProxyUtils })([]);
+    await assert.rejects(lateCallback(), /Script execution has ended/);
     runtimeClosed();
 });
 

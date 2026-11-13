@@ -1,6 +1,6 @@
 # QuickJS 脚本能力适配实现
 
-独立的本地实现包，不改动 Sub-Store 主工作区。纯 JS 库在 QuickJS 内运行，网络、表单和加密通过受控宿主接口调用。
+可独立运行的脚本能力包，也由项目的 Worker 脚本引擎引用。纯 JS 库在 QuickJS 内运行，网络、表单和加密通过受控宿主接口调用。
 
 ## 运行
 
@@ -65,6 +65,6 @@ const result = await sandbox.run(`
 
 ## 验证
 
-test-results.json 和 test-results.tap 记录 12 组通过的测试，使用本地 Node 宿主、QuickJS WASM 和回环 HTTP 服务。覆盖请求/响应、multipart、流、加密、模块、类型、异步回调及资源清理。
+test-results.json 和 test-results.tap 是此前的本地 Node 测试记录。CI 还会运行这 12 组测试以及实际 Worker 预览接口的针对性测试。
 
-未接入主线程 Sub-Store、未部署 Cloudflare。集成前仍需验证 Workers 的打包、运行时 API、CPU/内存开销及实际用户脚本；不能将本地通过理解为所有脚本兼容。
+Workers 的 Web API 和算法支持以实际运行环境为准；这些测试不能证明所有第三方脚本都兼容。
