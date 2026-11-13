@@ -170,7 +170,7 @@ async function executeSubStoreRequest({ $request, subStoreContext, requestId, ti
             if (timeoutId) clearTimeout(timeoutId);
             subStoreContext.done = null;
             logError(`[SubStoreAtom] [${requestId}] initSubStore failed:`, e?.stack || e?.message || e);
-            resolve({ result: { status: 500, body: 'Internal Server Error' }, timedOut: false });
+            resolve({ result: { status: 500, body: 'Internal Server Error' }, timedOut: false, initializationFailed: true });
         });
     });
 }
@@ -259,7 +259,7 @@ export async function runSubStoreHttpForUser({ user, env, state, request, subSto
         cache: cacheData,
     });
 
-    const { result } = await runWithSubStoreContext(subStoreContext, async () => await executeSubStoreRequest({
+    const { result, initializationFailed } = await runWithSubStoreContext(subStoreContext, async () => await executeSubStoreRequest({
         $request,
         subStoreContext,
         requestId,
@@ -267,15 +267,15 @@ export async function runSubStoreHttpForUser({ user, env, state, request, subSto
         timeoutLabel: '请求超时',
     }));
 
-    const dataString = flushSubStoreRequestContext(subStoreContext);
+    const dataString = initializationFailed ? null : flushSubStoreRequestContext(subStoreContext);
 
     // 持久化（由外部注入 __saveUserData 落库到 User 域存储）
-    if (typeof env?.__saveUserData === 'function') {
-        const savePromise = Promise.resolve(env.__saveUserData(user?.id, dataString)).finally(() => {
+    if (!initializationFailed && typeof env?.__saveUserData === 'function') {
+        try {
+            await env.__saveUserData(user?.id, dataString);
+        } finally {
             cleanupSubStoreAttempt(attemptId);
-        });
-        if (state?.waitUntil) state.waitUntil(savePromise);
-        else await savePromise;
+        }
     } else {
         cleanupSubStoreAttempt(attemptId);
     }

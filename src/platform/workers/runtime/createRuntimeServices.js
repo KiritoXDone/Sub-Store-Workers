@@ -35,6 +35,7 @@ import {
 import { createIndexGateway } from '../../../runtime/gateways/indexGateway.js';
 import { createUserGateway } from '../../../runtime/gateways/userGateway.js';
 import { createMmdbGateway } from '../../../runtime/gateways/mmdbGateway.js';
+import { compareAndPutUserDataInUserDo } from './compareUserData.js';
 import {
     deleteUserDataFromUserDo,
     getAccessLogFromUserDo,
@@ -162,6 +163,14 @@ function createWorkersUserDoGateway({ env }) {
             return await getUserDataFromUserDo({ env, userId, requestId: 'runtime-gateway' });
         },
 
+        async getUserDataSnapshot(userId) {
+            return { data: await getUserDataFromUserDo({ env, userId, requestId: 'runtime-gateway' }) };
+        },
+
+        async compareAndPutUserDataString(userId, snapshot, dataString) {
+            return await compareAndPutUserDataInUserDo({ env, userId, snapshot, dataString });
+        },
+
         async putUserDataString(userId, dataString) {
             return await putUserDataToUserDo({ env, userId, data: JSON.parse(dataString || '{}'), requestId: 'runtime-gateway' });
         },
@@ -190,6 +199,16 @@ function createWorkersLocalUserGateway({ storage }) {
     return createUserGateway({
         async getUserDataString(_userId) {
             return selectUserStoreValue(storage, 'user_data');
+        },
+
+        async getUserDataSnapshot(_userId) {
+            return { data: selectUserStoreValue(storage, 'user_data') };
+        },
+
+        async compareAndPutUserDataString(_userId, snapshot, dataString) {
+            if (selectUserStoreValue(storage, 'user_data') !== snapshot.data) return false;
+            upsertUserStoreValue(storage, 'user_data', dataString, Date.now());
+            return true;
         },
 
         async putUserDataString(_userId, dataString) {

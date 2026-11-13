@@ -21,29 +21,30 @@ export function createHttpClient() {
                 headers: { ...options.headers } || {},
             };
 
-            // 处理请求体
-            if (options.body) {
-                if (typeof options.body === 'object') {
-                    fetchOptions.body = JSON.stringify(options.body);
+            // 仅普通对象编码为 JSON；二进制和表单类型保持原样。
+            const body = options.body;
+            if (body != null && !(body === '' && (method === 'get' || method === 'head'))) {
+                const prototype = typeof body === 'object' ? Object.getPrototypeOf(body) : undefined;
+                if (prototype === Object.prototype || prototype === null) {
+                    fetchOptions.body = JSON.stringify(body);
                     fetchOptions.headers['Content-Type'] =
                         fetchOptions.headers['Content-Type'] || 'application/json';
                 } else {
-                    fetchOptions.body = options.body;
+                    fetchOptions.body = body;
                 }
             }
 
-            // 处理超时 - 最小 10 秒，最大 55 秒 (Workers 限制 60 秒)
-            let timeout = options.timeout || 30000;
-            // 如果传入值小于 1000，假设是秒数
-            if (timeout > 0 && timeout < 1000) {
-                timeout = timeout * 1000;
-            }
-            // 确保最小 10 秒
-            timeout = Math.max(timeout, 10000);
-            // 确保不超过 55 秒
-            timeout = Math.min(timeout, 55000);
+            // Surge $httpClient 的 timeout 单位为秒。保留项目的 55 秒上限。
+            const seconds = Number(options.timeout);
+            const timeout = Number.isFinite(seconds) && seconds > 0
+                ? Math.min(seconds * 1000, 55000)
+                : 30000;
 
             const controller = new AbortController();
+            const signal = options.signal;
+            const abortFromCaller = () => controller.abort(signal?.reason);
+            if (signal?.aborted) abortFromCaller();
+            else signal?.addEventListener?.('abort', abortFromCaller, { once: true });
             const timeoutId = setTimeout(() => {
                 warn(`[HTTP] 超时: ${timeout}ms - ${options.url}`);
                 controller.abort();
@@ -55,10 +56,9 @@ export function createHttpClient() {
             delete fetchOptions.insecure;
             delete fetchOptions.rejectUnauthorized;
 
-            fetch(options.url, fetchOptions)
+            Promise.resolve()
+                .then(() => fetch(options.url, fetchOptions))
                 .then(async (response) => {
-                    clearTimeout(timeoutId);
-
                     let body;
 
                     if (options.encoding === null) {
@@ -76,16 +76,21 @@ export function createHttpClient() {
 
                     debug(`[HTTP] 响应: ${method.toUpperCase()} ${options.url} -> ${response.status}`);
 
-                    callback(null, {
+                    return [{
                         status: response.status,
                         statusCode: response.status,
                         headers: headers,
-                    }, body);
+                    }, body];
                 })
-                .catch((err) => {
+                .then(([response, body]) => {
                     clearTimeout(timeoutId);
-                    error(`[HTTP] 错误: ${method.toUpperCase()} ${options.url} - ${err.message}`);
-                    callback(err.message || String(err), null, null);
+                    signal?.removeEventListener?.('abort', abortFromCaller);
+                    callback(null, response, body);
+                }, (err) => {
+                    clearTimeout(timeoutId);
+                    signal?.removeEventListener?.('abort', abortFromCaller);
+                    error(`[HTTP] 错误: ${method.toUpperCase()} ${options.url} - ${err?.message || String(err)}`);
+                    callback(err?.message || String(err), null, null);
                 });
         };
     });

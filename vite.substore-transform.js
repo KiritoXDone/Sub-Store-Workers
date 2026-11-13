@@ -1,6 +1,8 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import peggy from 'peggy';
+import { parse } from 'acorn';
+import { transformResourceCache } from './scripts/substore-cache-transform.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -109,7 +111,26 @@ export default function getParser() {
             }
             subStoreFileSeen = true;
 
-            let contents = code;
+            let contents = transformResourceCache(code, id);
+
+            if (id.endsWith('/src/main.js')) {
+                const ast = parse(contents, { ecmaVersion: 'latest', sourceType: 'module' });
+                const migrations = ast.body.filter((node) => node.type === 'ExpressionStatement' &&
+                    node.expression.type === 'CallExpression' && node.expression.callee.type === 'Identifier' &&
+                    node.expression.callee.name === 'migrate' && node.expression.arguments.length === 0);
+                if (migrations.length !== 1) this.error('[sub-store-transform] main.js migration entry changed');
+                const entry = migrations[0];
+                contents = contents.slice(0, entry.start) + 'globalThis.__substore_migrate__ = migrate;\n' + contents.slice(entry.start);
+            }
+
+            if (id.endsWith('/vendor/open-api.js')) {
+                const cloneOptions = 'const opts = JSON.parse(JSON.stringify(options));';
+                if (contents.includes('function HTTP(') && !contents.includes(cloneOptions)) {
+                    this.error('[sub-store-transform] HTTP options clone changed; AbortSignal patch not applied');
+                }
+                contents = contents.replace(cloneOptions, `${cloneOptions}
+                opts.signal = options.signal;`);
+            }
 
             contents = replaceEvalRequire(contents, 'dotenv', '({ config: () => {} })');
             contents = replaceEvalRequire(contents, 'fs', 'globalThis.__fs_shim__');
@@ -395,12 +416,12 @@ const tasks = {
             if (id.includes('sub-store/backend/src/core/proxy-utils/processors/index.js')) {
                 processorsFileSeen = true;
                 if (!contents.includes('__SUB_STORE_WORKERS_PATCH__QUICKJS_CREATE_DYNAMIC_FUNCTION__')) {
-                    const startMarker = 'function createDynamicFunction(name, script, $arguments, $options) {';
-                    const startIdx = contents.indexOf(startMarker);
-                    if (startIdx === -1) {
+                    const ast = parse(contents, { ecmaVersion: 'latest', sourceType: 'module' });
+                    const target = ast.body.find((node) => node.type === 'FunctionDeclaration' && node.id?.name === 'createDynamicFunction');
+                    if (!target || target.params.map((param) => param.name).join(',') !== 'name,script,$arguments,$options') {
                         this.error('[sub-store-transform] processors/index.js 补丁未应用：未找到 createDynamicFunction 定义');
                     }
-                    const before = contents.slice(0, startIdx);
+                    const before = contents.slice(0, target.start);
                     const patched = `function createDynamicFunction(name, script, $arguments, $options) {
     // __SUB_STORE_WORKERS_PATCH__QUICKJS_CREATE_DYNAMIC_FUNCTION__
     const flowUtils = {
@@ -434,7 +455,7 @@ const tasks = {
 }
 `;
                     processorsPatchApplied += 1;
-                    contents = before + patched;
+                    contents = before + patched + contents.slice(target.end);
                     if (!contents.includes('__SUB_STORE_WORKERS_PATCH__QUICKJS_CREATE_DYNAMIC_FUNCTION__')) {
                         this.error('[sub-store-transform] processors/index.js 补丁自检失败：缺少 marker');
                     }

@@ -14,6 +14,7 @@ import { getSystemSettings } from './services/systemSettingsService.js';
 import { getUserById, getUser, updateUserData, updatePassword, updateUsername, updatePath, generatePath } from './services/userService.js';
 import { getRequestId } from '../../utils/logger.js';
 import { normalizeUserDataToObject } from '../atoms/user/normalizeUserDataToObject.js';
+import { updateUserSettings } from '../atoms/user/updateUserSettings.js';
 import { sendTestNotification } from '../../orchestration/diplomat/notificationGateway.js';
 import { getChannelConfigs } from '../../../dashboard/constants/notificationChannels.js';
 
@@ -96,11 +97,8 @@ export async function handleDashboardUserApi({ request, env, authPayload, servic
     // POST /api/dashboard/user/settings
     if (path === '/api/dashboard/user/settings' && method === 'POST') {
         const newSettings = await request.json();
-        const user = await getUserById(ctx, authPayload.id);
-        const userData = normalizeUserDataToObject(user?.data);
-        userData.__settings__ = newSettings;
-        await updateUserData(ctx, authPayload.id, userData);
-        return okResponse();
+        if (await updateUserSettings(services.userGateway, authPayload.id, newSettings)) return okResponse();
+        return errorResponse('用户数据正在更新，请重试', 409);
     }
 
     // POST /api/dashboard/user/notification/test

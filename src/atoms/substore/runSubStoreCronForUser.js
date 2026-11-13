@@ -165,34 +165,36 @@ export async function runSubStoreCronForUser({ user, env }) {
     });
     debug(`[SubStoreAtom] [${requestId}] cron refresh`);
 
-    await runWithSubStoreContext(subStoreContext, async () => {
-        let timeoutId = null;
-        await new Promise((resolve) => {
-            subStoreContext.done = () => {
-                if (timeoutId) clearTimeout(timeoutId);
-                subStoreContext.done = null;
-                resolve();
-            };
-            timeoutId = setTimeout(() => {
-                warn(`[SubStoreAtom] [${requestId}] cron 超时`);
-                subStoreContext.done = null;
-                resolve();
-            }, 60000);
+    try {
+        await runWithSubStoreContext(subStoreContext, async () => {
+            let timeoutId = null;
+            await new Promise((resolve, reject) => {
+                subStoreContext.done = (result) => {
+                    if (timeoutId) clearTimeout(timeoutId);
+                    subStoreContext.done = null;
+                    const status = Number(result?.response?.status ?? result?.status ?? 200);
+                    if (status >= 400) reject(new Error(`Cron refresh returned ${status}`));
+                    else resolve();
+                };
+                timeoutId = setTimeout(() => {
+                    warn(`[SubStoreAtom] [${requestId}] cron 超时`);
+                    subStoreContext.done = null;
+                    reject(new Error('Cron refresh timed out'));
+                }, 60000);
 
-            initSubStore($request).catch((e) => {
-                if (timeoutId) clearTimeout(timeoutId);
-                subStoreContext.done = null;
-                logError(`[SubStoreAtom] [${requestId}] initSubStore failed:`, e?.stack || e?.message || e);
-                resolve();
+                initSubStore($request).catch((e) => {
+                    if (timeoutId) clearTimeout(timeoutId);
+                    subStoreContext.done = null;
+                    logError(`[SubStoreAtom] [${requestId}] initSubStore failed:`, e?.stack || e?.message || e);
+                    reject(e);
+                });
             });
         });
-    });
-
-    const dataString = flushSubStoreRequestContext(subStoreContext);
-
-    if (typeof env?.__saveUserData === 'function') {
-        await env.__saveUserData(user?.id, dataString);
+        const dataString = flushSubStoreRequestContext(subStoreContext);
+        if (typeof env?.__saveUserData === 'function') {
+            await env.__saveUserData(user?.id, dataString);
+        }
+    } finally {
+        deleteSubStoreRequestContext(requestId);
     }
-
-    deleteSubStoreRequestContext(requestId);
 }

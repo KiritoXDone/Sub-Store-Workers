@@ -47,13 +47,13 @@ function dispatchSubStoreRequest($request) {
  * @param {object} $request - 当前请求对象，(本地开发使用) 必须传入以避免并发请求覆盖
  */
 export async function initSubStore($request) {
-    if (initialized) {
-        debug('[SubStore] 已初始化，调用 dispatch 处理请求...');
-        dispatchSubStoreRequest($request);
-        return;
-    }
+    if (!initialized) await ensureSubStoreLoaded();
 
-    await ensureSubStoreLoaded();
+    // The module is shared, but migration and its storage are per user request.
+    if (typeof globalThis.__substore_migrate__ !== 'function') {
+        throw new Error('SubStore migration hook is not registered');
+    }
+    globalThis.__substore_migrate__();
 
     // 在模块完全加载后调用 dispatch 处理首次请求
     // 这避免了在模块导入期间执行 async I/O（Workers 禁止此操作）

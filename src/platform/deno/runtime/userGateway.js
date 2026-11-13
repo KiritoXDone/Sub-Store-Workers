@@ -3,6 +3,8 @@ import { withPgTransaction } from './postgres/withPgTransaction.js';
 import { withPgAdvisoryLock } from './postgres/withPgAdvisoryLock.js';
 
 const ACCESS_LOG_MAX_ROWS = 5000;
+const ACCESS_LOG_CLEANUP_INTERVAL = 64;
+const ACCESS_LOG_COUNTER_LIMIT = 2048;
 
 function toSafeNumber(value) {
     const n = Number(value);
@@ -19,6 +21,7 @@ function normalizeAccessLogRow(row) {
 }
 
 export function createDenoUserGateway({ pool, now = () => Date.now() }) {
+    const logWritesSinceCleanup = new Map();
     return createUserGateway({
         async getUserDataString(userId) {
             const result = await pool.query(
@@ -26,6 +29,32 @@ export function createDenoUserGateway({ pool, now = () => Date.now() }) {
                 [userId, 'user_data'],
             );
             return result.rows?.[0]?.value ?? null;
+        },
+
+        async getUserDataSnapshot(userId) {
+            const result = await pool.query(
+                'SELECT value, xmin::text AS revision FROM user_store WHERE user_id = $1 AND key = $2',
+                [userId, 'user_data'],
+            );
+            const row = result.rows?.[0];
+            return row ? { data: row.value, revision: row.revision } : { data: null, revision: null };
+        },
+
+        async compareAndPutUserDataString(userId, snapshot, dataString) {
+            return await withPgTransaction(pool, async (client) => {
+                return await withPgAdvisoryLock(client, { scope: 'user-store', entity: userId }, async () => {
+                    const result = snapshot.revision === null
+                        ? await client.query(
+                            'INSERT INTO user_store (user_id, key, value, updated_at) VALUES ($1, $2, $3, $4) ON CONFLICT (user_id, key) DO NOTHING',
+                            [userId, 'user_data', dataString, now()],
+                        )
+                        : await client.query(
+                            'UPDATE user_store SET value = $3, updated_at = $4 WHERE user_id = $1 AND key = $2 AND xmin::text = $5',
+                            [userId, 'user_data', dataString, now(), snapshot.revision],
+                        );
+                    return result.rowCount === 1;
+                });
+            });
         },
 
         async putUserDataString(userId, dataString) {
@@ -75,6 +104,7 @@ export function createDenoUserGateway({ pool, now = () => Date.now() }) {
         },
 
         async appendAccessLog(userId, entry) {
+            let nextCount;
             await withPgTransaction(pool, async (client) => {
                 await withPgAdvisoryLock(client, { scope: 'user-access-log', entity: userId }, async () => {
                     await client.query(
@@ -91,12 +121,22 @@ export function createDenoUserGateway({ pool, now = () => Date.now() }) {
                             entry.ip ?? null,
                         ],
                     );
-                    await client.query(
-                        'DELETE FROM download_access_log WHERE id IN (SELECT id FROM download_access_log WHERE user_id = $1 ORDER BY id DESC OFFSET $2)',
-                        [userId, ACCESS_LOG_MAX_ROWS],
-                    );
+                    const count = logWritesSinceCleanup.get(userId);
+                    const shouldClean = count === undefined || count >= ACCESS_LOG_CLEANUP_INTERVAL - 1;
+                    if (shouldClean) {
+                        await client.query(
+                            'DELETE FROM download_access_log WHERE id IN (SELECT id FROM download_access_log WHERE user_id = $1 ORDER BY id DESC OFFSET $2)',
+                            [userId, ACCESS_LOG_MAX_ROWS],
+                        );
+                    }
+                    nextCount = shouldClean ? 0 : count + 1;
                 });
             });
+            logWritesSinceCleanup.delete(userId);
+            logWritesSinceCleanup.set(userId, nextCount);
+            if (logWritesSinceCleanup.size > ACCESS_LOG_COUNTER_LIMIT) {
+                logWritesSinceCleanup.delete(logWritesSinceCleanup.keys().next().value);
+            }
         },
 
         async listAccessLog(userId, { limit, beforeId }) {

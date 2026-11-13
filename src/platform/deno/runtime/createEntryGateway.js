@@ -51,6 +51,7 @@ export function createEntryGatewayForDeno({
             const req = new Request('https://deno/_internal/index/settings', { method: 'GET' });
             setRequestIdHeader(req.headers, requestId);
             const resp = await ctx.handleIndexEntry({ request: req, env: ctx.env, pool: ctx.pool, services: ctx.services });
+            if (!resp.ok) throw new Error(`Index request failed: HTTP ${resp.status}`);
             return await resp.json();
         },
 
@@ -62,6 +63,7 @@ export function createEntryGatewayForDeno({
             const req = new Request(url.toString(), { method: 'GET' });
             setRequestIdHeader(req.headers, requestId);
             const resp = await ctx.handleIndexEntry({ request: req, env: ctx.env, pool: ctx.pool, services: ctx.services });
+            if (!resp.ok) throw new Error(`Index request failed: HTTP ${resp.status}`);
             return await resp.json();
         },
 

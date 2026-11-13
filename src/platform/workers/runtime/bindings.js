@@ -60,7 +60,7 @@ export async function listUsersFromIndexDo({ env, afterId, limit, requestId }) {
     const headers = new Headers();
     setRequestIdHeader(headers, requestId);
     const resp = await stub.fetch(url.toString(), { method: 'GET', headers });
-    if (!resp.ok) return { results: [] };
+    if (!resp.ok) throw new Error(`User listing failed: HTTP ${resp.status}`);
     return await resp.json();
 }
 
@@ -71,7 +71,7 @@ export async function getSettingsFromIndexDo({ env, requestId }) {
     const headers = new Headers();
     setRequestIdHeader(headers, requestId);
     const resp = await stub.fetch(url, { method: 'GET', headers });
-    if (!resp.ok) return {};
+    if (!resp.ok) throw new Error(`Settings lookup failed: HTTP ${resp.status}`);
     return await resp.json();
 }
 

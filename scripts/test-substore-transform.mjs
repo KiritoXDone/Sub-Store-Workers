@@ -60,3 +60,19 @@ for (const expression of ["require('fs')", 'eval("require(\'fs\')")']) {
         assert.equal(run({ __fs_shim__: shim }), shim);
     });
 }
+
+
+test('script factory replacement preserves following upstream declarations', () => {
+    const source = `
+function createDynamicFunction(name, script, $arguments, $options) {
+    const nested = () => ({ text: "}", template: \`value \${{ nested: true }.nested}\` });
+    return nested;
+}
+export const afterFactory = 'preserved';
+`;
+    const result = transformSource(source, 'core/proxy-utils/processors/index.js');
+    assert.ok(result.code.includes("export const afterFactory = 'preserved'"));
+    assert.ok(result.code.includes('__SUB_STORE_WORKERS_PATCH__QUICKJS_CREATE_DYNAMIC_FUNCTION__'));
+    assert.ok(!result.code.includes('const nested'));
+    assert.throws(() => transformSource('function createDynamicFunction(changed) {}', 'core/proxy-utils/processors/index.js'), /createDynamicFunction/);
+});

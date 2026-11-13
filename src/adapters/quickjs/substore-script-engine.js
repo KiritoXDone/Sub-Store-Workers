@@ -6,6 +6,8 @@
  */
 
 import { debug, warn } from '../../utils/logger.js';
+import { createQuickJsHostBridge, nativeToQuickJsHandle } from './quickjs-host-bridge.js';
+import { SUBSTORE_PRELUDE } from './substore-prelude.js';
 
 let quickJsModuleLoaderPromise = null;
 
@@ -33,7 +35,8 @@ function declaresNamedFunction(source, fnName) {
 function looksLikeShortcutScript(source) {
     const s = String(source || '');
     // Shortcut scripts in Sub-Store commonly rely on these injected identifiers.
-    return s.includes('$server') || s.includes('$content') || s.includes('$files');
+    return s.includes('$server') || s.includes('$content') || s.includes('$files')
+        || /\b(?:async\s+)?function\s+main\b|\b(?:const|let|var)\s+main\s*=/.test(s);
 }
 
 function wrapSubStoreShortcutScript(name, script) {
@@ -56,7 +59,7 @@ function wrapSubStoreShortcutScript(name, script) {
         return `async function operator(input = [], targetPlatform, context) {
             if (input && (input.$files || input.$content)) {
                 let { $content, $files, $options, $file } = input
-                if($file.type === 'mihomoProfile') {
+                if (['mihomoConfig', 'mihomoProfile'].includes($file?.type)) {
                     ${script}
                     if(typeof main === 'function') {
                         let config;
@@ -67,17 +70,7 @@ function wrapSubStoreShortcutScript(name, script) {
                                 console.log(e.message ?? e);
                             }
                         }
-                        $content = ProxyUtils.yaml.safeDump(await main(config || ($file.sourceType === 'none' ? {} : {
-                            proxies: await produceArtifact({
-                                type: $file.sourceType || 'collection',
-                                name: $file.sourceName,
-                                platform: 'mihomo',
-                                produceType: 'internal',
-                                produceOpts: {
-                                    'delete-underscore-fields': true
-                                }
-                            }),
-                        })))
+                        $content = ProxyUtils.yaml.safeDump(await main(config || {}))
                     }
                 } else {
                     ${script}
@@ -108,10 +101,6 @@ function normalizeSubStoreScriptForQuickJs(name, script) {
     return script;
 }
 
-function isThenable(x) {
-    return !!x && (typeof x === 'object' || typeof x === 'function') && typeof x.then === 'function';
-}
-
 function isSafePathSegment(seg) {
     if (!seg) return false;
     if (seg === '__proto__' || seg === 'prototype' || seg === 'constructor') return false;
@@ -125,7 +114,7 @@ function resolveCallable(rootMap, path) {
     if (parts.length === 0) throw new Error('empty path');
 
     const rootName = parts[0];
-    if (!(rootName in rootMap)) {
+    if (!Object.prototype.hasOwnProperty.call(rootMap, rootName)) {
         throw new Error(`host api root not allowed: ${rootName}`);
     }
 
@@ -137,55 +126,12 @@ function resolveCallable(rootMap, path) {
         cur = cur?.[seg];
     }
 
+    // lodash.mixin mutates its receiver, including the shared lodash module.
+    // Reject the function itself so aliases under another host root cannot bypass the guard.
+    if (typeof rootMap.lodash?.mixin === 'function' && cur === rootMap.lodash.mixin) {
+        throw new Error('host api not allowed: lodash.mixin');
+    }
     return { fn: cur, receiver };
-}
-
-function resolvePath(rootMap, path) {
-    const parts = String(path || '').split('.').filter(Boolean);
-    if (parts.length === 0) throw new Error('empty path');
-
-    const rootName = parts[0];
-    if (!(rootName in rootMap)) {
-        throw new Error(`host api root not allowed: ${rootName}`);
-    }
-
-    let cur = rootMap[rootName];
-    for (const seg of parts.slice(1)) {
-        if (!isSafePathSegment(seg)) throw new Error(`unsafe property access: ${seg}`);
-        cur = cur?.[seg];
-    }
-    return cur;
-}
-
-function nativeToQuickJsHandle(vm, value) {
-    if (value === null) return vm.null;
-    if (value === undefined) return vm.undefined;
-    if (typeof value === 'string') return vm.newString(value);
-    if (typeof value === 'number') return vm.newNumber(value);
-    if (typeof value === 'boolean') return value ? vm.true : vm.false;
-
-    if (Array.isArray(value)) {
-        const arr = vm.newArray();
-        for (let i = 0; i < value.length; i += 1) {
-            const h = nativeToQuickJsHandle(vm, value[i]);
-            vm.setProp(arr, i, h);
-            h.dispose();
-        }
-        return arr;
-    }
-
-    if (typeof value === 'object') {
-        const obj = vm.newObject();
-        for (const [k, v] of Object.entries(value)) {
-            const h = nativeToQuickJsHandle(vm, v);
-            vm.setProp(obj, k, h);
-            h.dispose();
-        }
-        return obj;
-    }
-
-    // Fallback: stringification
-    return vm.newString(String(value));
 }
 
 function buildEnvSnapshot($substore) {
@@ -202,453 +148,181 @@ function buildEnvSnapshot($substore) {
     return snapshot;
 }
 
-function buildPreludeSource() {
-    // - __hostCall(path, args)
-    // - __makeHostProxy(prefix) -> Proxy that calls __hostCall on apply
-    // - Buffer polyfill (minimal)
-    return `
-// __SUB_STORE_WORKERS_QJS_PRELUDE__
-function __makeHostProxy(prefix) {
-  const fn = function(...args) { return __hostCall(prefix, args); };
-  return new Proxy(fn, {
-    get(_t, prop) {
-      // Prevent thenable assimilation
-      if (prop === 'then') return undefined;
-      if (prop === Symbol.toStringTag) return 'HostProxy';
-      if (prop === 'toJSON') return () => '[HostProxy ' + prefix + ']';
-      return __makeHostProxy(prefix + '.' + String(prop));
-    },
-    apply(_t, _thisArg, args) {
-      return __hostCall(prefix, args);
-    }
-  });
-}
-globalThis.__makeHostProxy__ = __makeHostProxy;
-
-// Minimal Buffer polyfill (subset)
-const __b64chars__ = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-function __b64Encode__(bytes) {
-  let out = '';
-  let i = 0;
-  for (; i + 2 < bytes.length; i += 3) {
-    const n = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
-    out += __b64chars__[(n >> 18) & 63] + __b64chars__[(n >> 12) & 63] + __b64chars__[(n >> 6) & 63] + __b64chars__[n & 63];
-  }
-  const remain = bytes.length - i;
-  if (remain === 1) {
-    const n = bytes[i] << 16;
-    out += __b64chars__[(n >> 18) & 63] + __b64chars__[(n >> 12) & 63] + '==';
-  } else if (remain === 2) {
-    const n = (bytes[i] << 16) | (bytes[i + 1] << 8);
-    out += __b64chars__[(n >> 18) & 63] + __b64chars__[(n >> 12) & 63] + __b64chars__[(n >> 6) & 63] + '=';
-  }
-  return out;
-}
-function __b64Decode__(b64) {
-  const clean = String(b64 || '').replace(/\s+/g, '');
-  if (clean.length % 4 !== 0) throw new Error('Invalid base64');
-  const pad = (clean.endsWith('==') ? 2 : clean.endsWith('=') ? 1 : 0);
-  const len = (clean.length / 4) * 3 - pad;
-  const out = new Uint8Array(len);
-  let o = 0;
-  for (let i = 0; i < clean.length; i += 4) {
-    const c0 = __b64chars__.indexOf(clean[i]);
-    const c1 = __b64chars__.indexOf(clean[i + 1]);
-    const c2 = clean[i + 2] === '=' ? 0 : __b64chars__.indexOf(clean[i + 2]);
-    const c3 = clean[i + 3] === '=' ? 0 : __b64chars__.indexOf(clean[i + 3]);
-    const n = (c0 << 18) | (c1 << 12) | (c2 << 6) | c3;
-    if (o < out.length) out[o++] = (n >> 16) & 255;
-    if (o < out.length) out[o++] = (n >> 8) & 255;
-    if (o < out.length) out[o++] = n & 255;
-  }
-  return out;
-}
-
-class BufferPolyfill {
-  constructor(u8) { this._u8 = u8; }
-  static from(input, encoding) {
-    const enc = (encoding || 'utf8').toLowerCase();
-    if (typeof input === 'string') {
-      if (enc === 'base64') return new BufferPolyfill(__b64Decode__(input));
-      return new BufferPolyfill(new TextEncoder().encode(input));
-    }
-    if (input instanceof Uint8Array) return new BufferPolyfill(new Uint8Array(input));
-    if (input && input.buffer && input.byteLength !== undefined) return new BufferPolyfill(new Uint8Array(input.buffer));
-    return new BufferPolyfill(new TextEncoder().encode(String(input)));
-  }
-  toString(encoding) {
-    const enc = (encoding || 'utf8').toLowerCase();
-    if (enc === 'base64') return __b64Encode__(this._u8);
-    return new TextDecoder().decode(this._u8);
-  }
-  get length() { return this._u8.length; }
-}
-globalThis.__BufferPolyfill__ = BufferPolyfill;
-`;
-}
-
-async function runScriptOnce({
-    name,
-    script,
-    $arguments,
-    $options,
-    $substore,
-    hostRoots,
-    callArgs,
-    limits,
-}) {
+async function runScriptOnce({ name, script, $arguments, $options, $substore, hostRoots, callArgs, limits }) {
     const QuickJS = await getQuickJsModule();
-
     const runtime = QuickJS.newRuntime();
-    const vm = runtime.newContext();
-
-    const deadline = Date.now() + (limits.timeoutMs || DEFAULT_LIMITS.timeoutMs);
-    runtime.setMemoryLimit(limits.memoryLimitBytes || DEFAULT_LIMITS.memoryLimitBytes);
-    runtime.setMaxStackSize(limits.maxStackSizeBytes || DEFAULT_LIMITS.maxStackSizeBytes);
-    runtime.setInterruptHandler(() => Date.now() > deadline);
-
-    const executePendingJobs = () => {
-        const r = runtime.executePendingJobs();
-        // executePendingJobs may throw via unwrapResult if we want; here best-effort.
-        if (r && r.error) {
-            // dispose error handle to avoid leaking.
-            try {
-                r.error.dispose();
-            } catch {
-                // ignore
-            }
-        }
+    const owned = [];
+    let vm;
+    let bridge;
+    let wakeup;
+    let notified = false;
+    const own = (handle) => { owned.push(handle); return handle; };
+    const wake = () => {
+        notified = true;
+        if (wakeup) wakeup();
     };
 
-    // Host-call bridge
-    const hostCallHandle = vm.newFunction('__hostCall', (pathHandle, argsHandle) => {
-        const path = vm.dump(pathHandle);
-        const args = vm.dump(argsHandle) || [];
+    try {
+        const deadline = Date.now() + limits.timeoutMs;
+        runtime.setMemoryLimit(limits.memoryLimitBytes);
+        runtime.setMaxStackSize(limits.maxStackSizeBytes);
+        runtime.setInterruptHandler(() => Date.now() >= deadline);
+        vm = runtime.newContext();
+        bridge = createQuickJsHostBridge(vm, wake);
+        const roots = { ...hostRoots, textCodec: bridge.textCodec };
 
-        const callable = resolveCallable(hostRoots, path);
-        if (typeof callable.fn !== 'function') {
-            throw new Error(`host api is not callable: ${String(path)}`);
-        }
+        const expose = (object, name, handle) => {
+            own(handle);
+            vm.setProp(object, name, handle);
+            handle.dispose();
+        };
+        const unwrap = (result, label) => {
+            if (!result.error) return own(result.value);
+            try {
+                const error = vm.dump(result.error);
+                throw new Error(`${label}: ${error?.message || error}`);
+            } finally {
+                result.error.dispose();
+            }
+        };
+        const invokeHost = (path, args, errorAsObject = false, links) => {
+            path = String(path || '');
+            const callable = resolveCallable(roots, path);
+            if (typeof callable.fn !== 'function') throw new Error(`host api is not callable: ${String(path)}`);
+            if (path.startsWith('substore.http.')) {
+                const options = typeof args[0] === 'string' ? { url: args[0] } : { ...args[0] };
+                args = [{ ...options, signal: bridge.signal }, ...args.slice(1)];
+            }
+            return bridge.bridgeResult(callable.fn.apply(callable.receiver, args), errorAsObject, links);
+        };
 
-        let result;
-        try {
-            result = callable.fn.apply(callable.receiver, Array.isArray(args) ? args : [args]);
-        } catch (e) {
-            throw e;
-        }
+        expose(vm.global, '__hostCall', vm.newFunction('__hostCall', (path, args) => {
+            const call = bridge.openCall(args);
+            try {
+                return invokeHost(vm.dump(path), Array.isArray(call.value) ? call.value : [call.value], false, call.links);
+            } finally { call.close(); }
+        }));
+        unwrap(vm.evalCode(SUBSTORE_PRELUDE), 'QuickJS prelude failed').dispose();
 
-        if (isThenable(result)) {
-            const deferred = vm.newPromise();
-            deferred.settled.then(executePendingJobs);
+        const qjsArguments = own(nativeToQuickJsHandle(vm, $arguments || {}));
+        const qjsOptions = own(nativeToQuickJsHandle(vm, $options || {}));
+        const qjsSubstore = own(vm.newObject());
+        expose(qjsSubstore, 'env', nativeToQuickJsHandle(vm, buildEnvSnapshot($substore)));
 
-            Promise.resolve(result)
-                .then((value) => {
-                    const h = nativeToQuickJsHandle(vm, value);
-                    deferred.resolve(h);
-                    h.dispose();
-                })
-                .catch((err) => {
-                    const h = vm.newString(err?.message || String(err));
-                    deferred.reject(h);
-                    h.dispose();
-                });
-
-            return deferred.handle;
-        }
-
-        return nativeToQuickJsHandle(vm, result);
-    });
-
-    // Expose hostCall to global
-    vm.setProp(vm.global, '__hostCall', hostCallHandle);
-    // Transfer ownership to the VM (the global now references it)
-    hostCallHandle.dispose();
-
-    // Install prelude (proxies + Buffer polyfill)
-    const preludeResult = vm.evalCode(buildPreludeSource());
-    if (preludeResult.error) {
-        const msg = vm.dump(preludeResult.error);
-        preludeResult.error.dispose();
-        throw new Error(`QuickJS prelude failed: ${msg}`);
-    }
-    preludeResult.value.dispose();
-
-    // Build injected values
-    const envSnapshot = buildEnvSnapshot($substore);
-
-    const qjsArguments = nativeToQuickJsHandle(vm, $arguments || {});
-    const qjsOptions = nativeToQuickJsHandle(vm, $options || {});
-
-    // $substore object: env snapshot + selected methods mapped to host api
-    const qjsSubstore = vm.newObject();
-    const qjsEnv = nativeToQuickJsHandle(vm, envSnapshot);
-    vm.setProp(qjsSubstore, 'env', qjsEnv);
-    qjsEnv.dispose();
-
-    // $substore.http.* (very commonly used in Sub-Store scripts)
-    {
-        const qjsHttp = vm.newObject();
-        const methods = ['get', 'post', 'put', 'delete', 'head', 'options', 'patch'];
-        for (const method of methods) {
-            const fn = vm.newFunction(method, (optionsHandle) => {
-                const options = vm.dump(optionsHandle);
-                const callable = resolveCallable(hostRoots, `substore.http.${method}`);
-                const res = callable.fn.apply(callable.receiver, [options]);
-                if (isThenable(res)) {
-                    const deferred = vm.newPromise();
-                    deferred.settled.then(executePendingJobs);
-                    Promise.resolve(res)
-                        .then((v) => {
-                            const hv = nativeToQuickJsHandle(vm, v);
-                            deferred.resolve(hv);
-                            hv.dispose();
-                        })
-                        .catch((err) => {
-                            const he = vm.newError(err?.message || String(err));
-                            deferred.reject(he);
-                            he.dispose();
-                        });
-                    return deferred.handle;
-                }
-                return nativeToQuickJsHandle(vm, res);
-            });
-            vm.setProp(qjsHttp, method, fn);
-            fn.dispose();
+        const qjsHttp = own(vm.newObject());
+        for (const method of ['get', 'post', 'put', 'delete', 'head', 'options', 'patch']) {
+            expose(qjsHttp, method, vm.newFunction(method, (options) =>
+                invokeHost(`substore.http.${method}`, [bridge.toNative(options)], true)));
         }
         vm.setProp(qjsSubstore, 'http', qjsHttp);
-        qjsHttp.dispose();
-    }
 
-    const substoreMethods = ['read', 'write', 'delete', 'log', 'info', 'error', 'notify', 'wait'];
-    for (const m of substoreMethods) {
-        const fn = vm.newFunction(m, (...args) => {
-            // Forward to hostRoots.substore[m]
-            const nativeArgs = args.map((h) => vm.dump(h));
-            const callable = resolveCallable(hostRoots, `substore.${m}`);
-            const res = callable.fn.apply(callable.receiver, nativeArgs);
-            if (isThenable(res)) {
-                const deferred = vm.newPromise();
-                deferred.settled.then(executePendingJobs);
-                Promise.resolve(res)
-                    .then((v) => {
-                        const hv = nativeToQuickJsHandle(vm, v);
-                        deferred.resolve(hv);
-                        hv.dispose();
-                    })
-                    .catch((err) => {
-                        const he = vm.newString(err?.message || String(err));
-                        deferred.reject(he);
-                        he.dispose();
-                    });
-                return deferred.handle;
-            }
-            return nativeToQuickJsHandle(vm, res);
-        });
-        vm.setProp(qjsSubstore, m, fn);
-        fn.dispose();
-    }
+        for (const method of ['read', 'write', 'delete', 'log', 'info', 'error', 'notify', 'wait']) {
+            expose(qjsSubstore, method, vm.newFunction(method, (...args) =>
+                invokeHost(`substore.${method}`, args.map((arg) => bridge.toNative(arg)))));
+        }
 
-    // Provide console.* for common scripts
-    {
-        const consoleObj = vm.newObject();
-        const levels = ['log', 'info', 'warn', 'error'];
-        for (const level of levels) {
-            const fn = vm.newFunction(level, (...args) => {
-                const nativeArgs = args.map((h) => vm.dump(h));
+        const consoleObj = own(vm.newObject());
+        for (const level of ['log', 'info', 'warn', 'error']) {
+            expose(consoleObj, level, vm.newFunction(level, (...args) => {
                 try {
-                    // Prefer Sub-Store logger if available
-                    const sub = hostRoots.substore;
+                    const nativeArgs = args.map((arg) => bridge.toNative(arg));
+                    const sub = roots.substore;
                     const target = typeof sub?.[level] === 'function' ? sub[level] : console[level] || console.log;
-                    if (typeof sub?.[level] === 'function') {
-                        target.apply(sub, nativeArgs);
-                    } else {
-                        target(...nativeArgs);
-                    }
-                } catch {
-                    // ignore
-                }
+                    if (typeof sub?.[level] === 'function') target.apply(sub, nativeArgs);
+                    else target(...nativeArgs);
+                } catch { /* logging must not fail the script */ }
                 return vm.undefined;
-            });
-            vm.setProp(consoleObj, level, fn);
-            fn.dispose();
+            }));
         }
         vm.setProp(vm.global, 'console', consoleObj);
-        consoleObj.dispose();
-    }
 
-    // Provide Surge-like $utils (geoip/ipasn/ipaso) to QuickJS scripts.
-    // These call back into the host's globalThis.$utils.
-    {
-        const utilsObj = vm.newObject();
-        const methods = ['geoip', 'ipasn', 'ipaso'];
-        for (const method of methods) {
-            const fn = vm.newFunction(method, (ipHandle) => {
-                const ip = vm.dump(ipHandle);
-                const callable = resolveCallable(hostRoots, `surgeUtils.${method}`);
+        const utilsObj = own(vm.newObject());
+        for (const method of ['geoip', 'ipasn', 'ipaso']) {
+            expose(utilsObj, method, vm.newFunction(method, (ip) => {
+                const callable = resolveCallable(roots, `surgeUtils.${method}`);
                 if (typeof callable.fn !== 'function') return vm.undefined;
-                const res = callable.fn.apply(callable.receiver, [ip]);
-                return nativeToQuickJsHandle(vm, res);
-            });
-            vm.setProp(utilsObj, method, fn);
-            fn.dispose();
+                return bridge.bridgeResult(callable.fn.apply(callable.receiver, [bridge.toNative(ip)]));
+            }));
         }
         vm.setProp(vm.global, '$utils', utilsObj);
-        utilsObj.dispose();
-    }
 
-    // Host proxies
-    const makeHostProxy = vm.getProp(vm.global, '__makeHostProxy__');
-    const BufferPolyfill = vm.getProp(vm.global, '__BufferPolyfill__');
-
-    const mkProxy = (path) => {
-        const pathHandle = vm.newString(path);
-        const res = vm.callFunction(makeHostProxy, vm.undefined, pathHandle);
-        pathHandle.dispose();
-        return vm.unwrapResult(res);
-    };
-
-    const lodashProxy = mkProxy('lodash');
-    const proxyUtilsProxy = mkProxy('ProxyUtils');
-    const yamlProxy = mkProxy('ProxyUtils.yaml');
-    const b64dProxy = mkProxy('ProxyUtils.Base64.decode');
-    const b64eProxy = mkProxy('ProxyUtils.Base64.encode');
-    const domainResolversProxy = mkProxy('DOMAIN_RESOLVERS');
-    const cacheProxy = mkProxy('scriptResourceCache');
-    const flowUtilsProxy = mkProxy('flowUtils');
-    const produceArtifactProxy = mkProxy('produceArtifact');
-
-    // Wrapper that emulates upstream new Function signature
-    const wrapperSource = `
+        const makeHostProxy = own(vm.getProp(vm.global, '__makeHostProxy__'));
+        const bufferPolyfill = own(vm.getProp(vm.global, '__BufferPolyfill__'));
+        const mkProxy = (path) => {
+            const pathHandle = own(vm.newString(path));
+            try { return unwrap(vm.callFunction(makeHostProxy, vm.undefined, pathHandle), 'QuickJS proxy failed'); }
+            finally { pathHandle.dispose(); }
+        };
+        const proxies = [
+            'lodash', 'ProxyUtils', 'ProxyUtils.yaml', 'ProxyUtils.Base64.decode',
+            'ProxyUtils.Base64.encode', 'DOMAIN_RESOLVERS', 'scriptResourceCache',
+            'flowUtils', 'produceArtifact',
+        ].map(mkProxy);
+        const wrapperSource = `
 (function($arguments,$options,$substore,lodash,ProxyUtils,yaml,Buffer,b64d,b64e,DOMAIN_RESOLVERS,scriptResourceCache,flowUtils,produceArtifact,require){
 ${script}\n
 return ${name};
 })
 `;
+        const wrapper = unwrap(vm.evalCode(wrapperSource), 'QuickJS compile failed');
+        const fn = unwrap(vm.callFunction(
+            wrapper, vm.undefined, qjsArguments, qjsOptions, qjsSubstore,
+            proxies[0], proxies[1], proxies[2], bufferPolyfill, ...proxies.slice(3), vm.undefined,
+        ), 'QuickJS script setup failed');
+        const qjsCallArgs = callArgs.map((arg) => own(nativeToQuickJsHandle(vm, arg)));
+        const result = unwrap(vm.callFunction(fn, vm.undefined, ...qjsCallArgs), 'QuickJS script threw');
+        for (const arg of qjsCallArgs) arg.dispose();
 
-    const wrapperEval = vm.evalCode(wrapperSource);
-    if (wrapperEval.error) {
-        const msg = vm.dump(wrapperEval.error);
-        wrapperEval.error.dispose();
-        throw new Error(`QuickJS compile failed: ${msg}`);
-    }
-    const wrapperFn = wrapperEval.value;
+        // Wake only when a host promise settles, with one timer for the remaining deadline.
+        const waitForHost = async () => {
+            if (notified) { notified = false; return; }
+            const remaining = deadline - Date.now();
+            if (remaining <= 0) throw new Error('QuickJS promise pending timeout');
+            await new Promise((resolve) => {
+                const timer = setTimeout(resolve, remaining);
+                wakeup = () => { clearTimeout(timer); resolve(); };
+            });
+            wakeup = undefined;
+            notified = false;
+        };
 
-    const qjsRequire = vm.undefined;
-
-    const fnHandle = vm.unwrapResult(
-        vm.callFunction(
-            wrapperFn,
-            vm.undefined,
-            qjsArguments,
-            qjsOptions,
-            qjsSubstore,
-            lodashProxy,
-            proxyUtilsProxy,
-            yamlProxy,
-            BufferPolyfill,
-            b64dProxy,
-            b64eProxy,
-            domainResolversProxy,
-            cacheProxy,
-            flowUtilsProxy,
-            produceArtifactProxy,
-            qjsRequire,
-        ),
-    );
-
-    const qjsCallArgs = callArgs.map((v) => nativeToQuickJsHandle(vm, v));
-    const callResult = vm.callFunction(fnHandle, vm.undefined, ...qjsCallArgs);
-
-    // dispose call args handles
-    for (const h of qjsCallArgs) h.dispose();
-
-    if (callResult.error) {
-        const msg = vm.dump(callResult.error);
-        callResult.error.dispose();
-        throw new Error(`QuickJS script threw: ${msg}`);
-    }
-
-    const resultHandle = callResult.value;
-
-    // Await promise by pumping pending jobs.
-    // In QuickJS, async functions queue pendingJobs and they do not run unless the host calls executePendingJobs().
-    // If we just await resolvePromise() without pumping jobs, even an immediately-resolving async function will hang.
-    let finalHandle = null;
-    let shouldDisposeFinal = false;
-    while (true) {
-        const state = vm.getPromiseState(resultHandle);
-        if (state.type === 'pending') {
-            if (Date.now() > deadline) {
-                throw new Error('QuickJS promise pending timeout');
+        while (true) {
+            if (bridge.getFailure()) throw bridge.getFailure();
+            const state = vm.getPromiseState(result);
+            if (state.type === 'rejected') {
+                try {
+                    const error = vm.dump(state.error);
+                    throw new Error(`QuickJS promise rejected: ${error?.message || error}`);
+                } finally { state.error.dispose(); }
             }
+            if (state.type !== 'pending') {
+                const finalHandle = state.notAPromise || state.value === result ? result : own(state.value);
+                return bridge.toNative(finalHandle);
+            }
+            if (Date.now() >= deadline) throw new Error('QuickJS promise pending timeout');
             if (runtime.hasPendingJob()) {
-                const r = runtime.executePendingJobs();
-                if (r && r.error) {
-                    const msg = vm.dump(r.error);
+                const jobs = runtime.executePendingJobs();
+                if (jobs.error) {
                     try {
-                        r.error.dispose();
-                    } catch {
-                        // ignore
-                    }
-                    throw new Error(`QuickJS executePendingJobs error: ${msg}`);
+                        const error = vm.dump(jobs.error);
+                        throw new Error(`QuickJS executePendingJobs error: ${error?.message || error}`);
+                    } finally { jobs.error.dispose(); }
                 }
-                continue;
+            } else {
+                await waitForHost();
             }
-            // No pending jobs: yield to host event loop so that any host-side promises can resolve.
-            await new Promise((resolve) => setTimeout(resolve, 0));
-            continue;
         }
-
-        if (state.type === 'rejected') {
-            const msg = vm.dump(state.error);
-            state.error.dispose();
-            throw new Error(`QuickJS promise rejected: ${msg}`);
+    } finally {
+        try { bridge?.close(); } catch (error) { warn('[QuickJS] bridge cleanup error:', error?.message || error); }
+        for (let i = owned.length - 1; i >= 0; i--) {
+            try { if (owned[i].alive) owned[i].dispose(); }
+            catch (error) { warn('[QuickJS] handle cleanup error:', error?.message || error); }
         }
-
-        // fulfilled
-        if (state.notAPromise || state.value === resultHandle) {
-            finalHandle = resultHandle;
-            shouldDisposeFinal = false;
-        } else {
-            finalHandle = state.value;
-            shouldDisposeFinal = true;
-        }
-        break;
+        try { if (vm?.alive) vm.dispose(); }
+        catch (error) { warn('[QuickJS] context cleanup error:', error?.message || error); }
+        try { if (runtime.alive) runtime.dispose(); }
+        catch (error) { warn('[QuickJS] runtime cleanup error:', error?.message || error); }
     }
-
-    const out = vm.dump(finalHandle);
-
-    // Cleanup handles
-    try {
-        if (shouldDisposeFinal && finalHandle) finalHandle.dispose();
-        resultHandle.dispose();
-        fnHandle.dispose();
-        wrapperFn.dispose();
-
-        qjsArguments.dispose();
-        qjsOptions.dispose();
-        qjsSubstore.dispose();
-
-        lodashProxy.dispose();
-        proxyUtilsProxy.dispose();
-        yamlProxy.dispose();
-        b64dProxy.dispose();
-        b64eProxy.dispose();
-        domainResolversProxy.dispose();
-        cacheProxy.dispose();
-        flowUtilsProxy.dispose();
-        produceArtifactProxy.dispose();
-        makeHostProxy.dispose();
-        BufferPolyfill.dispose();
-    } catch (e) {
-        // best-effort cleanup; vm.dispose() will still assert on leaks.
-        warn('[QuickJS] cleanup error:', e?.message || e);
-    }
-
-    vm.dispose();
-    runtime.dispose();
-
-    return out;
 }
 
 export function ensureSubStoreQuickJsScriptEngineInstalled({

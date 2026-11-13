@@ -29,6 +29,7 @@ export async function handleUserEntry({ request, env, pool, services }) {
             services: services || createRuntimeServices({ pool }),
         });
     } catch (err) {
+        if (err?.code === 'USER_DATA_CONFLICT') return errorResponse(err.message, 409);
         logError(`[DenoUser] [${requestId}] unhandled error:`, err?.stack || err?.message || err);
         return errorResponse('Internal Server Error', 500);
     }
