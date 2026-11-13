@@ -12,10 +12,12 @@
  */
 
 import { sendBarkNotification, sendTelegramNotification, sendFtqqNotification, sendFtqq3Notification, sendPushoverNotification } from '../../atoms/substore/notificationAtoms.js';
+import { sendShoutrrrNotification } from '../../atoms/substore/shoutrrrNotification.js';
 import { NOTIFICATION_CHANNELS } from '../../../dashboard/constants/notificationChannels.js';
 import { debug } from '../../utils/logger.js';
 
 const SENDERS = {
+    shoutrrr: sendShoutrrrNotification,
     bark: sendBarkNotification,
     telegram: sendTelegramNotification,
     ftqq: sendFtqqNotification,

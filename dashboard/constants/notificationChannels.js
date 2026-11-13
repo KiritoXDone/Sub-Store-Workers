@@ -10,6 +10,14 @@
 
 export const NOTIFICATION_CHANNELS = [
     {
+        type: 'shoutrrr',
+        label: 'Shoutrrr',
+        requiredKey: 'url',
+        fields: [
+            { key: 'url', label: '通知服务 URL', placeholder: 'ntfy://ntfy.sh/你的主题' },
+        ],
+    },
+    {
         type: 'bark',
         label: 'Bark',
         requiredKey: 'deviceKey',

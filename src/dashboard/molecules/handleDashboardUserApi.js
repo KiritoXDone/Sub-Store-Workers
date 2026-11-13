@@ -85,11 +85,13 @@ export async function handleDashboardUserApi({ request, env, authPayload, servic
     if (path === '/api/dashboard/user/settings' && method === 'GET') {
         const user = await getUserById(ctx, authPayload.id);
         const userData = normalizeUserDataToObject(user?.data);
-        const settings = userData.__settings__ || {
+        const storedSettings = userData.__settings__ || {};
+        const settings = {
             surgeVersion: '5.0.0',
             surgeBuild: '2000',
             cronEnabled: true,
-            notification: { type: 'none', ...getChannelConfigs() }
+            ...storedSettings,
+            notification: { type: 'none', ...getChannelConfigs(), ...storedSettings.notification },
         };
         return jsonResponse(settings);
     }
