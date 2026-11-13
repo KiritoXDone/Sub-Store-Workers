@@ -88,8 +88,10 @@ jobs:
 
     steps:
       - name: Validate JWT_SECRET
+        env:
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
         run: |
-          if [ -z "${{ secrets.JWT_SECRET }}" ]; then
+          if [ -z "$JWT_SECRET" ]; then
             echo "::error::JWT_SECRET 未设置！"
             exit 1
           fi
@@ -121,12 +123,22 @@ jobs:
           rsync -av --exclude='.git' --exclude='build' --exclude='node_modules' . build/
 
       - name: Configure wrangler.toml
+        env:
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          WORKER_NAME: ${{ secrets.CF_WORKER_NAME }}
         run: |
           cd build
-          cp wrangler.toml.example wrangler.toml
-          JWT_SECRET='${{ secrets.JWT_SECRET }}'
-          ESCAPED_JWT_SECRET=$(printf '%s' "$JWT_SECRET" | sed -e 's/[\\/&]/\\\\&/g')
-          sed -i "s|__JWT_SECRET__|$ESCAPED_JWT_SECRET|g" wrangler.toml
+          python3 - <<'PYCONFIG'
+          import json, os, pathlib, re
+          config = pathlib.Path('wrangler.toml.example').read_text()
+          config = config.replace('"__JWT_SECRET__"', json.dumps(os.environ['JWT_SECRET']))
+          name = os.environ.get('WORKER_NAME', '').strip()
+          if name:
+              if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,62}', name):
+                  raise SystemExit('Invalid CF_WORKER_NAME')
+              config = re.sub(r'^name\s*=.*$', 'name = ' + json.dumps(name), config, count=1, flags=re.M)
+          pathlib.Path('wrangler.toml').write_text(config)
+          PYCONFIG
 
       - name: Install backend dependencies
         working-directory: build
@@ -156,7 +168,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
         run: |
-          pnpm run deploy:workers:action
+          pnpm exec wrangler deploy --keep-vars 2>&1 | sed -e '/workers[.]dev/d' -e '/https:/d'
           echo "Deploy completed"
 
   deploy-frontend:
