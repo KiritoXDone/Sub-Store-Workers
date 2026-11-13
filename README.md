@@ -2,7 +2,7 @@
 
 几年前想部署到 Workers 实现长期在线，但后续发现不支持 eval()，核心的脚本操作无法使用所以停更了。
 
-如果你需要一个仅仅是用于订阅转换的工具，不需要脚本功能，并且可以持续在线，那么这个项目可能适合你。
+项目通过 QuickJS-WASM 提供实验性的脚本执行，同时适配 Cloudflare Workers 和 Deno Deploy。
 
 在 Cloudflare Workers 上运行 Sub-Store。
 
@@ -28,7 +28,7 @@ Workers 会在多实例下并发处理请求。为了兼容 Sub-Store 的原有�
 > 本项目通过 **QuickJS (WASM)** 为 Sub-Store 的「脚本过滤/脚本操作」提供兼容实现（实验性）。
 > - ✅ 支持 `async/await`（通过 QuickJS Promise + pendingJobs 驱动）
 > - ✅ 默认启用 CPU/内存/栈限制，避免脚本无限循环/内存失控
-> - ⚠️ 仍属于兼容层能力：与 Node 环境不等价，不支持 `require`/本地文件等
+> - ⚠️ 仍属于兼容层能力：与 Node 环境不等价，不支持 `require`/本地文件等；宿主工具函数支持同步回调，异步回调暂不支持，Buffer 仅覆盖常用接口。
 > - ⚠️ 大脚本/大数据会有额外开销（需要在宿主与 QuickJS 之间做数据序列化/复制）
 > 
 > 如遇到部分脚本功能无法使用，请查看 [Sub-Store 相关教程](https://xream.notion.site/Sub-Store-abe6a96944724dc6a36833d5c9ab7c87) 将其部署到 VPS/Docker 运行
@@ -36,7 +36,8 @@ Workers 会在多实例下并发处理请求。为了兼容 Sub-Store 的原有�
 - **脚本**：QuickJS 兼容实现
 - **GeoIP**: 已实现，需要在仪表盘配置 mmdb 文件 URL
 - **代理请求**: 不可用，但也不需要
-- **推送通知**: shoutrrr 不可用，可以使用其他方式 Bark、Pushover
+- **推送通知**：支持现有渠道与 Shoutrrr URL；Shoutrrr 使用运行环境的 fetch，要求 GET/HEAD 携带请求体的配置不支持。
+- **DNS**：可使用上游 DoH 解析；不提供任意 UDP DNS 或本地代理内核。
 
 ---
 
@@ -182,6 +183,13 @@ Deno Deploy 目前无前端部分
 
 每个用户拥有独立的 Sub-Store 空间，互不干扰。
 
+### 分享
+
+官方前端可创建订阅、集合和文件分享。公开下载地址为 `/share/:type/:name?token=...`，不会包含后台私有路径。令牌携带用户路由前缀，下载时仍按用户数据中的完整令牌、资源类型及名称验证，支持上游的到期时间、次数限制和撤销。修改令牌前缀不能访问其他用户的资源。
+
+从其他环境导入的旧令牌不含用户路由前缀，需要在此环境重新创建分享后使用公开根链接。Deno 并发修改同一份用户数据时可能返回 409，请重试；Workers 对同一用户的请求排队并等待保存。
+
+
 ---
 
 ## 🔄 自动更新
@@ -200,7 +208,8 @@ Deno Deploy 目前无前端部分
 
 ### 前置要求
 
-- pnpm
+- Node.js 24
+- package.json 指定版本的 pnpm（安装及 CI 使用提交的锁文件）
 
 ### 快速开始
 
@@ -247,10 +256,17 @@ pnpm run preview:workers
 
 ### 订阅下载超时
 
-Workers HTTP 请求超时为 10-55 秒。如果目标服务器响应慢，可能会超时。
+HTTP 适配器遵循上游 Surge 接口的秒数单位，默认 30 秒、项目上限 55 秒，超时覆盖响应体读取；这些是项目策略，并非 Workers HTTP 请求的统一平台时长限制。QuickJS 脚本仍有独立执行期限。
 
 ---
 
 ## License
 
 [AGPL-3.0](LICENSE)
+
+
+### 构建与验证
+
+根依赖使用 `pnpm-lock.yaml`，Deno 使用 `deno.lock`；Sub-Store 源码仍由 `SUBSTORE_VERSION` 或最新 release 决定，排查问题时应同时记录该 tag。更新上游时运行现有 transform、脚本桥接、分享和运行时聚焦测试，再分别检查 Workers 与 Deno 构建。无需为依赖更新重复运行完整业务测试。
+
+GeoIP 加载失败会退避重试，已加载数据库定期检查元数据更新。Cron 对不同用户做有界并发；Deno 下载日志分批清理，短时间内可略多于 5000 条。

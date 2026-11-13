@@ -33,8 +33,6 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
-        with:
-          version: latest
 
       - name: Fetch Sub-Store source
         env:
@@ -42,10 +40,16 @@ jobs:
         run: bash scripts/fetch-substore.sh
 
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
+
+      - name: Test Sub-Store transforms
+        run: pnpm run test:substore-transform
 
       - name: Install backend dependencies
         run: pnpm run install:backend
+
+      - name: Test runtime adapters
+        run: node --test scripts/test-share.mjs scripts/test-quickjs-engine.mjs scripts/test-shoutrrr-notification.mjs scripts/test-runtime.mjs scripts/test-resource-cache.mjs
 
       - name: Configure wrangler.toml
         run: |
@@ -121,7 +125,7 @@ jobs:
         run: bash scripts/fetch-substore.sh
 
       - name: Install dependencies
-        run: deno install
+        run: deno install --frozen
 
       - name: Install backend dependencies
         run: deno task install:backend
