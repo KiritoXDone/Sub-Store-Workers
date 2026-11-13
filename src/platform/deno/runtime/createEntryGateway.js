@@ -34,11 +34,16 @@ export function createEntryGatewayForDeno({
             return await ctx.services.indexGateway.getUserByPath(userPath);
         },
 
-        async forwardSubStoreRequest({ request, user, requestId }) {
+        async getUserById({ userId }) {
+            const ctx = await ensureIndexContext();
+            return await ctx.services.indexGateway.getUserById(userId);
+        },
+
+        async forwardSubStoreRequest({ request, user, requestId, preservePath = false }) {
             const ctx = await ensureUserContext();
             const originalUrl = new URL(request.url);
             const newUrl = new URL(request.url);
-            newUrl.pathname = stripFirstPathSegment(originalUrl.pathname);
+            newUrl.pathname = preservePath ? originalUrl.pathname : stripFirstPathSegment(originalUrl.pathname);
             newUrl.search = originalUrl.search;
             const forwarded = new Request(newUrl.toString(), request);
             setUserHeaders(forwarded.headers, user);

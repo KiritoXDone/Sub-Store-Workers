@@ -51,6 +51,18 @@ export async function getUserByPathFromIndexDo({ env, userPath, requestId }) {
     return await resp.json();
 }
 
+export async function getUserByIdFromIndexDo({ env, userId, requestId }) {
+    const id = env.INDEX_DO.idFromName('index');
+    const stub = env.INDEX_DO.get(id);
+    const url = new URL('/_internal/index/user/by-id', INDEX_ORIGIN);
+    url.searchParams.set('id', String(userId || ''));
+    const headers = new Headers();
+    setRequestIdHeader(headers, requestId);
+    const resp = await stub.fetch(url.toString(), { method: 'GET', headers });
+    if (!resp.ok) return null;
+    return await resp.json();
+}
+
 export async function listUsersFromIndexDo({ env, afterId, limit, requestId }) {
     const id = env.INDEX_DO.idFromName('index');
     const stub = env.INDEX_DO.get(id);
@@ -158,10 +170,10 @@ export async function putMmdbFileToIndexDo({ env, name, etag, arrayBuffer, reque
     return resp.ok;
 }
 
-export async function forwardRequestToUserDoSubStore({ request, env, user, requestId }) {
+export async function forwardRequestToUserDoSubStore({ request, env, user, requestId, preservePath = false }) {
     const originalUrl = new URL(request.url);
     const newUrl = new URL(request.url);
-    newUrl.pathname = stripFirstPathSegment(originalUrl.pathname);
+    newUrl.pathname = preservePath ? originalUrl.pathname : stripFirstPathSegment(originalUrl.pathname);
     newUrl.search = originalUrl.search;
     const forwarded = new Request(newUrl.toString(), request);
     setUserHeaders(forwarded.headers, user);

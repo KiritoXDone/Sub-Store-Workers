@@ -2,6 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import peggy from 'peggy';
 import { parse } from 'acorn';
+import { transformShareSupport } from './scripts/substore-share-transform.mjs';
 import { transformResourceCache } from './scripts/substore-cache-transform.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -111,7 +112,7 @@ export default function getParser() {
             }
             subStoreFileSeen = true;
 
-            let contents = transformResourceCache(code, id);
+            let contents = transformResourceCache(transformShareSupport(code, id), id);
 
             if (id.endsWith('/src/main.js')) {
                 const ast = parse(contents, { ecmaVersion: 'latest', sourceType: 'module' });

@@ -26,6 +26,10 @@ export function parseIndexEntryRoute(request) {
         return { kind: 'user-by-path', userPath };
     }
 
+    if (path === '/_internal/index/user/by-id' && method === 'GET') {
+        return { kind: 'user-by-id', userId: Number(url.searchParams.get('id')) };
+    }
+
     if (path === INDEX_ENDPOINTS.USERS_LIST && method === 'GET') {
         const afterId = parseInt(url.searchParams.get('afterId') || '0', 10) || 0;
         const limit = parseInt(url.searchParams.get('limit') || '200', 10) || 200;

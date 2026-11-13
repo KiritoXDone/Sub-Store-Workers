@@ -24,6 +24,8 @@ export function parseHttpRoute(request) {
         };
     }
 
+    if (pathname.startsWith('/share/')) return { kind: 'share' };
+
     const pathSegments = pathname.split('/').filter(Boolean);
     if (pathSegments.length === 0) {
         return { kind: 'not-found' };

@@ -6,6 +6,7 @@
 import { parseHttpRoute } from '../dataOfficer/httpDataOfficer.js';
 import { normalizeCronSettings } from '../dataOfficer/cronDataOfficer.js';
 import { handleDashboardRequest } from '../../molecules/http/handleDashboardRequest.js';
+import { handleShareRequest } from '../../molecules/http/handleShareRequest.js';
 import { handleUserPathRequest } from '../../molecules/http/handleUserPathRequest.js';
 import { runCronBatch } from '../../molecules/http/runCronBatch.js';
 import { buildCorsPreflightResponse } from '../../atoms/http/httpAtoms.js';
@@ -20,6 +21,10 @@ export async function handleHttp({ request, env, ctx, requestId, entryGateway })
 
     if (route.kind === 'dashboard') {
         return await handleDashboardRequest({ request, env, requestId, route, entryGateway });
+    }
+
+    if (route.kind === 'share') {
+        return await handleShareRequest({ request, requestId, entryGateway });
     }
 
     if (route.kind === 'user-path') {

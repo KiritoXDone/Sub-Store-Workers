@@ -7,6 +7,7 @@ import { parseIndexEntryRoute } from '../dataOfficer/indexEntryRouteDataOfficer.
 import { mergeSystemSettings, mergeSystemSettingsPatch } from '../dataOfficer/systemSettingsDataOfficer.js';
 import { getSettings } from '../../molecules/index/getSettings.js';
 import { patchSettings } from '../../molecules/index/patchSettings.js';
+import { getUserById } from '../../molecules/index/getUserById.js';
 import { getUserByPath } from '../../molecules/index/getUserByPath.js';
 import { listUsers } from '../../molecules/index/listUsers.js';
 import { updateAvatar } from '../../molecules/index/updateAvatar.js';
@@ -36,6 +37,8 @@ export async function handle({ request, env, storage, requestId, services }) {
             indexGateway,
         });
     }
+
+    if (route.kind === 'user-by-id') return await getUserById({ route, indexGateway });
 
     if (route.kind === 'user-by-path') {
         return await getUserByPath({ request, env, storage, requestId, route, indexGateway });

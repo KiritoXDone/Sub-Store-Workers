@@ -2,6 +2,7 @@ import {
     fetchIndexDo,
     fetchAsset,
     getUserByPathFromIndexDo,
+    getUserByIdFromIndexDo,
     forwardRequestToUserDoSubStore,
     getSettingsFromIndexDo,
     listUsersFromIndexDo,
@@ -24,8 +25,12 @@ export function createEntryGatewayForWorkers({ env }) {
             return await getUserByPathFromIndexDo({ env, userPath, requestId });
         },
 
-        async forwardSubStoreRequest({ request, user, requestId }) {
-            return await forwardRequestToUserDoSubStore({ request, env, user, requestId });
+        async getUserById({ userId, requestId }) {
+            return await getUserByIdFromIndexDo({ env, userId, requestId });
+        },
+
+        async forwardSubStoreRequest({ request, user, requestId, preservePath }) {
+            return await forwardRequestToUserDoSubStore({ request, env, user, requestId, preservePath });
         },
 
         async getSettings({ requestId }) {
