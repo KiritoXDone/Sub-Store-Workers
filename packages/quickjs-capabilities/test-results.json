@@ -1,0 +1,27 @@
+{
+  "testsPassed": 12,
+  "testsFailed": 0,
+  "cases": [
+    "sandbox lodash and Buffer retain mutation, async callbacks and base64url",
+    "Headers and Response support cloning, bodyUsed, JSON and invalid states",
+    "Blob/File and repeated FormData fields round-trip through multipart",
+    "local fetch handles Request, multipart upload, redirects and immutable headers",
+    "streams support decode, upload, tee, pipeTo and body locking",
+    "abort remains effective after response headers; stream cancel closes transport",
+    "Web Crypto HMAC and AES-GCM enforce extractability",
+    "key pairs, derivation and wrapping use native CryptoKey handles",
+    "rich values preserve cycles, types and shared ArrayBuffers through host conversion",
+    "async host callbacks resolve later and propagate rejections",
+    "CommonJS/ESM whitelist supports caching, crypto and events while denying fs",
+    "body/resource quotas and never-settled callbacks clean up on failure"
+  ],
+  "environment": {
+    "node": "v26.8.1",
+    "platform": "darwin",
+    "arch": "x64",
+    "quickjs": "0.32.0"
+  },
+  "capabilitySourceBytes": 197537,
+  "capabilityGzipBytes": 58513,
+  "scope": "Independent implementation; local QuickJS WASM + Node host and loopback HTTP. No main-thread edits or Cloudflare deployment."
+}
