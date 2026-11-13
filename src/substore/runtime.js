@@ -28,7 +28,7 @@ export async function prepareSubStoreRuntime({ env, state, requestId }) {
     }
     installSubStoreRuntimeGlobals();
     globalThis.$httpClient = createHttpClient();
-    ensureSubStoreQuickJsScriptEngineInstalled();
+    ensureSubStoreQuickJsScriptEngineInstalled({ debug: env?.DEBUG === 'true' || env?.DEBUG === true });
     await ensureSurgeGeoipInstalled(env, { requestId });
 
     const lifetime = state?.waitUntil ? { waitUntil: (task) => state.waitUntil(task) } : undefined;

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createRequire } from 'node:module';
 import { ensureSubStoreQuickJsScriptEngineInstalled } from '../src/quickjs/substore-script-engine.js';
+import { debug as scriptDebug } from '../packages/quickjs-capabilities/src/logger.js';
 
 const { newQuickJSWASMModuleFromVariant } = await import(process.env.QUICKJS_TEST_CORE || 'quickjs-emscripten-core');
 const { default: variant } = await import(process.env.QUICKJS_TEST_VARIANT || '@jitl/quickjs-wasmfile-release-sync');
@@ -23,6 +24,21 @@ const makeOperator = (script, overrides = {}) => factory({
     ...overrides,
 });
 const runtimeClosed = () => assert.equal(runtimes.at(-1).alive, false);
+
+test('script logging follows the Worker debug setting', () => {
+    const original = console.log;
+    const lines = [];
+    console.log = (...args) => lines.push(args);
+    try {
+        ensureSubStoreQuickJsScriptEngineInstalled({ debug: true });
+        scriptDebug('enabled');
+        ensureSubStoreQuickJsScriptEngineInstalled({ debug: false });
+        scriptDebug('disabled');
+        assert.deepEqual(lines, [['[DEBUG]', 'enabled']]);
+    } finally {
+        console.log = original;
+    }
+});
 
 test('releases the runtime on compile, execution and timeout failures', async () => {
     for (const script of [
