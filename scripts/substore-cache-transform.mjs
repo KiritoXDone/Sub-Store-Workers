@@ -21,7 +21,7 @@ export function transformResourceCache(source, id) {
     }
 
     // Each request owns its cache snapshot; the existing upstream _persist() still
-    // writes to the same per-user storage key and format.
+    // writes to the same storage key and format.
     const replacement = `constructor() {}
     get resourceCache() {
         const context = globalThis.__substore_get_active_context__?.();

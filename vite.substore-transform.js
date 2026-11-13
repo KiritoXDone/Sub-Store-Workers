@@ -263,6 +263,32 @@ function __emitDone__(requestId, response) {
                 openApiFileSeen = true;
                 const beforeOpenApi = contents;
 
+                if (contents.includes('function HTTP(')) {
+                    const ast = parse(contents, { ecmaVersion: 'latest', sourceType: 'module' });
+                    const openApi = ast.body.map((node) => node.type === 'ExportNamedDeclaration' ? node.declaration : node)
+                        .find((node) => node?.type === 'ClassDeclaration' && node.id?.name === 'OpenAPI');
+                    const write = openApi?.body.body.find((node) => node.type === 'MethodDefinition' && node.key?.name === 'write');
+                    const originalWrite = write && contents.slice(write.start, write.end);
+                    if (!write || !originalWrite.includes('$persistentStore.write(data, key)') ||
+                        write.value.params.map((param) => param.name).join(',') !== 'data,key') {
+                        this.error('[sub-store-transform] open-api.js backup write contract changed');
+                    }
+                    const position = write.value.body.start + 1;
+                    contents = contents.slice(0, position) + `
+        // Keep the request snapshot in step with direct #sub-store restores.
+        if (key === '#sub-store') {
+            const context = globalThis.__substore_get_active_context__?.();
+            if (!context) throw new Error('Sub-Store restore context unavailable');
+            const restored = JSON.parse(data);
+            if (!restored || typeof restored !== 'object' || Array.isArray(restored)) throw new Error('Invalid Sub-Store backup');
+            const saved = $persistentStore.write(data, 'sub-store');
+            if (!saved) throw new Error('Sub-Store backup write failed');
+            context.cache = restored;
+            return saved;
+        }
+` + contents.slice(position);
+                }
+
                 const needsIsNodePatch = beforeOpenApi.includes('const isNode = eval(`typeof process');
                 if (needsIsNodePatch && !contents.includes('const isNode = false')) {
                     this.error('[sub-store-transform] open-api.js 环境检测补丁未生效：isNode 仍可能触发 eval()');
@@ -383,7 +409,7 @@ const tasks = {
     }
 
     const context = globalThis.__substore_get_active_context__?.();
-    const scope = context?.user?.id ?? context?.requestId ?? '';
+    const scope = context?.requestId ?? '';
     const inflightKey = String(scope) + '::' + String(ua || '') + '::' + String(rawUrl) + '::' + (preprocess ? '1' : '0');
     if (!globalThis.__sub_store_workers_inflight_tasks__) {
         globalThis.__sub_store_workers_inflight_tasks__ = new Map();

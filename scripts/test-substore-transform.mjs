@@ -76,3 +76,51 @@ export const afterFactory = 'preserved';
     assert.ok(!result.code.includes('const nested'));
     assert.throws(() => transformSource('function createDynamicFunction(changed) {}', 'core/proxy-utils/processors/index.js'), /createDynamicFunction/);
 });
+
+test('restoring a backup replaces the request cache before migration and preserves data on failure', () => {
+    const source = `
+function HTTP(options) { const opts = JSON.parse(JSON.stringify(options)); }
+const isSurge = true;
+export class OpenAPI {
+    initCache() { this.cache = JSON.parse($persistentStore.read(this.name) || '{}'); }
+    persistCache() { const data = JSON.stringify(this.cache, null, 2); $persistentStore.write(data, 'sub-store'); }
+    write(data, key) {
+        if (key.indexOf('#') !== -1) { key = key.substr(1); return $persistentStore.write(data, key); }
+        this.cache[key] = data;
+        this.persistCache();
+    }
+    read(key) { return this.cache[key]; }
+    delete(key) { delete this.cache[key]; }
+}
+`;
+    const result = transformSource(source, 'vendor/open-api.js');
+    const oldContext = globalThis.__substore_get_active_context__;
+    const oldStore = globalThis.$persistentStore;
+    const context = { cache: { schemaVersion: '2.0', subs: [{ name: 'old' }] } };
+    let persisted = 'original';
+    let writeResult = true;
+    globalThis.__substore_get_active_context__ = () => context;
+    globalThis.$persistentStore = {
+        read: () => persisted,
+        write: (data) => { if (writeResult) persisted = data; return writeResult; },
+    };
+    try {
+        const OpenAPI = new Function(result.code.replace('export class OpenAPI', 'class OpenAPI') + '\nreturn OpenAPI;')();
+        const api = new OpenAPI();
+        const restored = { settings: {}, subs: [{ name: 'restored' }] };
+        assert.equal(api.write(JSON.stringify(restored), '#sub-store'), true);
+        assert.deepEqual(context.cache, restored);
+        if (!api.read('schemaVersion')) api.write('2.0', 'schemaVersion');
+        assert.deepEqual(JSON.parse(persisted), { ...restored, schemaVersion: '2.0' });
+        assert.throws(() => api.write('{invalid', '#sub-store'));
+        const before = persisted;
+        const oldCache = context.cache;
+        writeResult = false;
+        assert.throws(() => api.write(JSON.stringify({ settings: {}, subs: [] }), '#sub-store'), /backup write failed/);
+        assert.equal(persisted, before);
+        assert.equal(context.cache, oldCache);
+    } finally {
+        globalThis.__substore_get_active_context__ = oldContext;
+        globalThis.$persistentStore = oldStore;
+    }
+});

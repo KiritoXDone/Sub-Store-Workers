@@ -8,14 +8,10 @@ sub-store*
 
 # Build output
 dist/
-src/sub-store-bundle.js
-public/dashboard/
+public/frontend/
+public/.frontend-version
 
 # QuickJS wasm files copied from node_modules
-src/adapters/quickjs/wasm/*.wasm
-src/adapters/quickjs/wasm/*.wasm.map.txt
-src/platform/workers/runtime/wasm/*.wasm
-src/platform/workers/runtime/wasm/*.wasm.map.txt
 
 # Wrangler
 .wrangler/
@@ -28,3 +24,6 @@ package-lock.json
 
 # OS files
 .DS_Store
+
+# QuickJS runtime asset
+src/quickjs/wasm/

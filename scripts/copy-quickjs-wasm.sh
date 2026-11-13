@@ -9,7 +9,7 @@ set -euo pipefail
 # Ref: https://github.com/justjake/quickjs-emscripten/tree/main/examples/cloudflare-workers
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUT_DIR="${ROOT_DIR}/src/platform/workers/runtime/wasm"
+OUT_DIR="${ROOT_DIR}/src/quickjs/wasm"
 
 mkdir -p "${OUT_DIR}"
 

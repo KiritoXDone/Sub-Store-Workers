@@ -4,7 +4,7 @@ import test from 'node:test';
 import { parse } from 'acorn';
 import { subStoreTransformPlugin } from '../vite.substore-transform.js';
 
-test('upstream caches use each request tenant data and persist independently', () => {
+test('upstream caches use each request snapshot and persist independently', () => {
     const previous = globalThis.__substore_get_active_context__;
     let current;
     globalThis.__substore_get_active_context__ = () => current;

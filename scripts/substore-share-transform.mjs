@@ -2,7 +2,7 @@ import { parse } from 'acorn';
 
 function replaceRequired(source, before, after) {
     if (!source.includes(before)) throw new Error(`[sub-store-share] upstream contract changed: ${before}`);
-    return source.replace(before, after);
+    return source.replace(before, () => after);
 }
 
 export function transformShareSupport(source, id) {
@@ -14,20 +14,16 @@ export function transformShareSupport(source, id) {
             throw new Error('[sub-store-share] signToken environment guard changed');
         }
         source = source.slice(0, guard.start) + source.slice(guard.end);
-        source = replaceRequired(source, 'let token = payload?.token;', `let token = payload?.token;
-    const userId = globalThis.__substore_get_active_context__?.()?.user?.id;
-    if (!Number.isSafeInteger(userId) || userId <= 0) throw new Error('Share user context unavailable');
-    const prefix = 'u' + userId + '.';
-    if (typeof token === 'string' && token && !token.startsWith(prefix)) token = prefix + token;`);
-        source = replaceRequired(source, 'token = nanoid.customAlphabet(nanoid.urlAlphabet)();', "token = prefix + crypto.randomUUID().replace(/-/g, '');");
+        if (!source.includes('let token = payload?.token;')) throw new Error('[sub-store-share] token payload changed');
+        source = replaceRequired(source, 'token = nanoid.customAlphabet(nanoid.urlAlphabet)();', "token = crypto.randomUUID().replace(/-/g, '');");
         return source;
     }
     if (id.endsWith('/restful/miscs.js')) {
         source = replaceRequired(source, "import env from '@/utils/env';", "import baseEnv from '@/utils/env';");
         return replaceRequired(source, 'function getEnv(req, res) {', `function getEnv(req, res) {
-    const user = globalThis.__substore_get_active_context__?.()?.user;
+    const secretPath = String(globalThis.__substore_get_active_context__?.()?.env?.SUB_STORE_FRONTEND_BACKEND_PATH || '/').trim().replace(new RegExp('/+$'), '') || '/';
     const env = { ...baseEnv, feature: { ...baseEnv.feature, share: true },
-        meta: { ...baseEnv.meta, node: { env: { SUB_STORE_FRONTEND_BACKEND_PATH: '/' + (user?.path || '') } } } };`);
+        meta: { ...baseEnv.meta, node: { ...baseEnv.meta?.node, env: { ...baseEnv.meta?.node?.env, SUB_STORE_FRONTEND_BACKEND_PATH: secretPath } } } };`);
     }
     if (id.endsWith('/restful/index.js')) {
         source = replaceRequired(source, '    // register routes', `    // Token validation applies to both public and private-path share requests.

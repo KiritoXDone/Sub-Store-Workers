@@ -3,12 +3,12 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { releaseAssetUrl, validateRelease } from './validate-release.mjs';
 
 const SUBSTORE_REPO = process.env.SUBSTORE_REPO || 'sub-store-org/Sub-Store';
 const FRONTEND_REPO = process.env.FRONTEND_REPO || 'sub-store-org/Sub-Store-Front-End';
 const FORCE_DEPLOY = process.env.FORCE_DEPLOY || 'false';
 const EVENT_NAME = process.env.EVENT_NAME || '';
-const DEPLOY_FRONTEND_MODE = process.env.DEPLOY_FRONTEND_MODE || 'auto';
 const RUN_ID = process.env.RUN_ID || `${Date.now()}`;
 const GITHUB_OUTPUT = process.env.GITHUB_OUTPUT || '';
 const GITHUB_API_TOKEN = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '';
@@ -75,7 +75,7 @@ function buildHeaders() {
   return headers;
 }
 
-async function fetchLatestTag(repo) {
+async function fetchLatestTag(repo, assetName) {
   const url = `https://api.github.com/repos/${repo}/releases/latest`;
   const headers = buildHeaders();
   let lastError;
@@ -108,7 +108,8 @@ async function fetchLatestTag(repo) {
         throw new Error(`获取 ${repo} releases/latest 失败：HTTP ${response.status}${message ? ` - ${message}` : ''}`);
       }
 
-      const tagName = ensureOutputValue(body?.tag_name);
+      const tagName = ensureOutputValue(validateRelease(body));
+      if (assetName) releaseAssetUrl(body, assetName, repo);
       return tagName;
     } catch (error) {
       lastError = error;
@@ -130,7 +131,7 @@ async function main() {
 
   const [backendVersion, frontendVersion] = await Promise.all([
     fetchLatestTag(SUBSTORE_REPO),
-    fetchLatestTag(FRONTEND_REPO),
+    fetchLatestTag(FRONTEND_REPO, 'dist.zip'),
   ]);
 
   const [lastBackend, lastFrontend] = await Promise.all([
@@ -143,34 +144,17 @@ async function main() {
 
   const deployToken = `ACTION_START_${RUN_ID}`;
   const deployBackend =
-    normalizeBoolean(FORCE_DEPLOY) || EVENT_NAME === 'push' || backendVersion !== lastBackend
+    normalizeBoolean(FORCE_DEPLOY) || EVENT_NAME === 'push' || backendVersion !== lastBackend || frontendVersion !== lastFrontend
       ? deployToken
       : 'ACTION_HOLD';
-
-  let deployFrontendNeeded = 'ACTION_HOLD';
-  if (DEPLOY_FRONTEND_MODE === 'deploy') {
-    deployFrontendNeeded = deployToken;
-  } else if (DEPLOY_FRONTEND_MODE === 'skip') {
-    deployFrontendNeeded = 'ACTION_HOLD';
-  } else if (frontendVersion !== lastFrontend) {
-    deployFrontendNeeded = deployToken;
-  }
 
   await writeOutputs({
     backend_version: backendVersion,
     frontend_version: frontendVersion,
     deploy_backend: deployBackend,
-    deploy_frontend_needed: deployFrontendNeeded,
   });
 
   console.log(`Backend deploy: ${deployBackend === 'ACTION_HOLD' ? 'NO' : 'YES'}`);
-  if (DEPLOY_FRONTEND_MODE === 'deploy') {
-    console.log('Frontend deploy: YES (manual deploy)');
-  } else if (DEPLOY_FRONTEND_MODE === 'skip') {
-    console.log('Frontend deploy: NO (manual skip)');
-  } else {
-    console.log(`Frontend deploy: ${deployFrontendNeeded === 'ACTION_HOLD' ? 'NO' : 'YES (version changed)'}`);
-  }
 }
 
 main().catch((error) => {

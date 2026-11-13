@@ -36,19 +36,9 @@ require_cmd() {
   }
 }
 
-require_any_cmd() {
-  for cmd in "$@"; do
-    if command -v "$cmd" >/dev/null 2>&1; then
-      return 0
-    fi
-  done
-  echo "[fetch-substore] 缺少依赖命令：需要以下任意一个：$*" >&2
-  exit 1
-}
-
 require_cmd curl
 require_cmd tar
-require_any_cmd python3 deno node
+require_cmd node
 
 GITHUB_API_TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
 
@@ -60,28 +50,15 @@ if [[ -n "${GITHUB_API_TOKEN}" ]]; then
   curl_auth_args+=(-H "Accept: application/vnd.github+json")
 fi
 
-parse_json_tag_name() {
-  # 从 stdin 读取 JSON，输出 tag_name
-  if command -v python3 >/dev/null 2>&1; then
-    python3 -c 'import sys, json; j=json.load(sys.stdin); t=j.get("tag_name"); assert t, "缺少 tag_name"; print(t, end="")'
-    return
-  fi
-  if command -v deno >/dev/null 2>&1; then
-    deno eval 'const input = await new Response(Deno.stdin.readable).text(); const j = JSON.parse(input); if (!j.tag_name) throw new Error("缺少 tag_name"); await Deno.stdout.write(new TextEncoder().encode(String(j.tag_name)));'
-    return
-  fi
-  if command -v node >/dev/null 2>&1; then
-    node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{try{const j=JSON.parse(s);if(!j.tag_name) throw new Error("缺少 tag_name");process.stdout.write(String(j.tag_name));}catch(e){console.error(e.message);process.exit(1);}});'
-    return
-  fi
-  echo "[fetch-substore] 无法解析 GitHub API JSON：缺少 python3 / deno / node" >&2
-  exit 1
-}
-
-get_latest_version() {
+get_release_version() {
   local api="https://api.github.com/repos/${SUBSTORE_REPO}/releases/latest"
-  # 使用 python3/deno/node 解析 JSON，并在限流时给出提示
-  local headers_file body_file status
+  local requested="${1:-}"
+  if [[ -n "${requested}" ]]; then
+    local encoded_tag
+    encoded_tag="$(node -p 'encodeURIComponent(process.argv[1])' "${requested}")"
+    api="https://api.github.com/repos/${SUBSTORE_REPO}/releases/tags/${encoded_tag}"
+  fi
+  local headers_file body_file status rc parsed
   headers_file="$(mktemp)"
   body_file="$(mktemp)"
 
@@ -97,7 +74,7 @@ get_latest_version() {
 
   if [[ $rc -ne 0 ]]; then
     rm -f "${headers_file}" "${body_file}"
-    echo "[fetch-substore] 获取最新 release 失败：网络错误（curl rc=${rc}）。" >&2
+    echo "[fetch-substore] 获取 release 失败：网络错误（curl rc=${rc}）。" >&2
     exit 1
   fi
 
@@ -114,23 +91,26 @@ get_latest_version() {
 
     msg="$(cat "${body_file}" 2>/dev/null || true)"
     rm -f "${headers_file}" "${body_file}"
-    echo "[fetch-substore] 获取最新 release 失败：HTTP ${status}" >&2
+    echo "[fetch-substore] 获取 release 失败：HTTP ${status}" >&2
     if [[ -n "${msg}" ]]; then
       echo "[fetch-substore] 响应内容：${msg}" >&2
     fi
     exit 1
   fi
 
-  version="$(cat "${body_file}" | parse_json_tag_name)"
+  if ! parsed="$(node "${root_dir}/scripts/validate-release.mjs" "${requested}" < "${body_file}")"; then
+    rm -f "${headers_file}" "${body_file}"
+    echo "[fetch-substore] release 无效或不是正式发布" >&2
+    return 1
+  fi
   rm -f "${headers_file}" "${body_file}"
-  printf '%s' "${version}"
+  printf '%s' "${parsed}"
 }
 
-version="${SUBSTORE_VERSION}"
-if [[ -z "${version}" ]]; then
+if [[ -z "${SUBSTORE_VERSION}" ]]; then
   log "未设置 SUBSTORE_VERSION，正在解析最新 release 版本..."
-  version="$(get_latest_version)"
 fi
+version="$(get_release_version "${SUBSTORE_VERSION}")"
 if [[ -z "${version}" ]]; then
   echo "[fetch-substore] 解析到空版本号，终止执行" >&2
   exit 1
@@ -164,8 +144,9 @@ on_exit() {
 trap on_exit EXIT
 
 archive="${tmp}/sub-store.tar.gz"
+encoded_version="$(node -p 'encodeURIComponent(process.argv[1])' "${version}")"
 curl -fL --retry 3 --retry-delay 1 --retry-all-errors \
-  "https://github.com/${SUBSTORE_REPO}/archive/refs/tags/${version}.tar.gz" \
+  "https://github.com/${SUBSTORE_REPO}/archive/refs/tags/${encoded_version}.tar.gz" \
   -o "${archive}"
 tar -xzf "${archive}" -C "${tmp}"
 

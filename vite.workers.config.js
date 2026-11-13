@@ -7,28 +7,19 @@
  */
 import { defineConfig } from 'vite';
 import { cloudflare } from '@cloudflare/vite-plugin';
-import { createDashboardBuildParts } from './vite.shared.config.js';
-
-const dashboard = createDashboardBuildParts();
+import path from 'node:path';
+import { SUB_STORE_PATH, subStoreTransformPlugin } from './vite.substore-transform.js';
 
 export default defineConfig({
+    publicDir: 'public/frontend',
+    build: {
+        outDir: 'dist/single-workers',
+    },
     plugins: [
-        ...dashboard.plugins,
+        subStoreTransformPlugin(),
         cloudflare(),
     ],
-    resolve: dashboard.resolve,
-    environments: {
-        client: {
-            build: {
-                assetsDir: dashboard.assetsDir,
-                rollupOptions: {
-                    input: dashboard.input,
-                    external: dashboard.external,
-                },
-            },
-        },
-    },
-    optimizeDeps: dashboard.optimizeDeps,
+    resolve: { alias: { '@': path.join(SUB_STORE_PATH, 'src') } },
     // 开发服务器配置
     server: {
         strictPort: true,

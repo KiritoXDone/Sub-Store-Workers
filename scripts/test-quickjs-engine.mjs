@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createRequire } from 'node:module';
-import { ensureSubStoreQuickJsScriptEngineInstalled } from '../src/adapters/quickjs/substore-script-engine.js';
+import { ensureSubStoreQuickJsScriptEngineInstalled } from '../src/quickjs/substore-script-engine.js';
 
 const { newQuickJSWASMModuleFromVariant } = await import(process.env.QUICKJS_TEST_CORE || 'quickjs-emscripten-core');
 const { default: variant } = await import(process.env.QUICKJS_TEST_VARIANT || '@jitl/quickjs-wasmfile-release-sync');

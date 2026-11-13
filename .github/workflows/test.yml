@@ -1,7 +1,8 @@
-name: API Smoke Test
+name: Cloudflare API Test
 
 on:
   push:
+    branches: [main]
     paths-ignore:
       - 'README.md'
       - 'LICENSE'
@@ -9,6 +10,7 @@ on:
       - 'docs/**'
       - '*.md'
   pull_request:
+    branches: [main]
     paths-ignore:
       - 'README.md'
       - 'LICENSE'
@@ -21,7 +23,6 @@ jobs:
   test-workers:
     runs-on: ubuntu-latest
     name: Workers API Test
-
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -34,27 +35,30 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
 
-      - name: Fetch Sub-Store source
+      - name: Fetch Sub-Store release
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: bash scripts/fetch-substore.sh
+        run: |
+          bash scripts/fetch-substore.sh
+          bash scripts/fetch-frontend.sh
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Test Sub-Store transforms
-        run: pnpm run test:substore-transform
-
       - name: Install backend dependencies
         run: pnpm run install:backend
 
-      - name: Test runtime adapters
-        run: node --test scripts/test-share.mjs scripts/test-quickjs-engine.mjs scripts/test-shoutrrr-notification.mjs scripts/test-runtime.mjs scripts/test-resource-cache.mjs scripts/test-legacy-share-user.mjs
+      - name: Test runtime and release selection
+        run: |
+          node --test scripts/test-release-selection.mjs scripts/test-substore-transform.mjs scripts/test-resource-cache.mjs scripts/test-share.mjs scripts/test-quickjs-engine.mjs scripts/test-substore-engine.mjs scripts/test-shoutrrr-notification.mjs scripts/test-single-store-routing.mjs scripts/test-single-store-storage.mjs
 
       - name: Configure wrangler.toml
         run: |
           cp wrangler.toml.example wrangler.toml
-          sed -i 's/__JWT_SECRET__/test-jwt-secret-for-ci-testing-32chars/g' wrangler.toml
+          sed -i 's|__SUB_STORE_FRONTEND_BACKEND_PATH__|/local-test-backend|g' wrangler.toml
+
+      - name: Build Worker and official frontend
+        run: pnpm run build:workers
 
       - name: Start dev server
         run: |
@@ -64,7 +68,7 @@ jobs:
       - name: Wait for server
         uses: iFaxity/wait-on-action@v1.2.1
         with:
-          resource: http-get://127.0.0.1:3000/api/dashboard/settings/public
+          resource: http-get://127.0.0.1:3000/local-test-backend/api/utils/env
           timeout: 120000
           interval: 1000
           httpTimeout: 10000
@@ -72,95 +76,13 @@ jobs:
 
       - name: Print Workers dev log on failure
         if: failure()
-        run: |
-          cat workers-dev.log || true
+        run: cat workers-dev.log || true
 
       - name: Run API tests
-        run: node scripts/test-dashboard.js http://localhost:3000
+        run: |
+          node scripts/test-single-store.mjs http://127.0.0.1:3000
+          curl -fsS http://127.0.0.1:3000/ | cmp - public/frontend/index.html
 
       - name: Stop dev server
-        if: always()
-        run: |
-          kill "$DEV_PID" 2>/dev/null || true
-          pkill -f "vite" 2>/dev/null || true
-
-  test-deno:
-    runs-on: ubuntu-latest
-    name: Deno API Test
-    env:
-      DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
-
-    services:
-      postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-
-      - name: Setup Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-
-      - name: Fetch Sub-Store source
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: bash scripts/fetch-substore.sh
-
-      - name: Install dependencies
-        run: deno install --frozen
-
-      - name: Install backend dependencies
-        run: deno task install:backend
-
-      - name: Build dashboard
-        run: deno task build:dashboard
-
-      - name: Run database migration
-        run: deno task migrate
-
-      - name: Start Deno server
-        env:
-          PORT: '8000'
-          JWT_SECRET: test-jwt-secret-for-ci-testing-32chars
-        run: |
-          deno task dev > deno-dev.log 2>&1 &
-          echo "DEV_PID=$!" >> "$GITHUB_ENV"
-
-      - name: Wait for server
-        uses: iFaxity/wait-on-action@v1.2.1
-        with:
-          resource: http-get://127.0.0.1:8000/api/dashboard/settings/public
-          timeout: 120000
-          interval: 1000
-          httpTimeout: 10000
-          log: true
-
-      - name: Print Deno dev log on failure
-        if: failure()
-        run: |
-          cat deno-dev.log || true
-
-      - name: Run API tests
-        run: node scripts/test-dashboard.js http://localhost:8000
-
-      - name: Stop Deno server
         if: always()
         run: kill "$DEV_PID" 2>/dev/null || true

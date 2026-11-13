@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { sendShoutrrrNotification } from '../src/atoms/substore/shoutrrrNotification.js';
+import { sendShoutrrrNotification } from '../src/shoutrrr.js';
 
 test('Shoutrrr uses fetch for delivery and reports unsupported channels', async () => {
     const originalFetch = globalThis.fetch;

@@ -1,272 +1,67 @@
 # Sub-Store Workers
 
-几年前想部署到 Workers 实现长期在线，但后续发现不支持 eval()，核心的脚本操作无法使用所以停更了。
+在 Cloudflare Workers 上运行 Sub-Store。使用 QuickJS-WASM 执行订阅脚本，保留官方订阅转换、集合、文件、分享、Gist 备份和定时任务。
 
-项目通过 QuickJS-WASM 提供实验性的脚本执行，同时适配 Cloudflare Workers 和 Deno Deploy。
+本项目没有 Dashboard、账号、注册、登录、JWT 或用户管理。根路径提供官方 Release 的 Sub-Store 前端，私有路径提供后端 API。
 
-在 Cloudflare Workers 上运行 Sub-Store。
+> 本次为破坏性更新：Cloudflare 的迁移会删除旧 IndexDO 和 UserDO 命名空间，创建全新的单库 StoreDO。旧账号、用户数据和分享不会迁移。需要的数据应自行从外部备份恢复。
 
-## 特性
+## 使用
 
-- ✅ 使用 Durable Objects (SQLite) 持久化存储
-- ✅ Cron Triggers 定时同步
-- ✅ 不修改 Sub-Store 源代码
-- ✅ GitHub Actions 自动部署（前后端）
-- ✅ 每 3 天自动检查更新并部署
+后端管理地址由 `SUB_STORE_FRONTEND_BACKEND_PATH` 设置，例如：
 
-### 为什么从 D1 换到 Durable Objects
-
-Workers 会在多实例下并发处理请求。为了兼容 Sub-Store 的原有存储模型（单用户数据聚合在一条记录中），同一时刻多个请求对同一用户执行“读-改-写”时，若没有额外的版本控制/锁机制，在 D1 中容易出现后写覆盖先写（丢更新）。Durable Objects 按 Object ID 提供单活实例与串行处理能力，更适合这种高冲突写入场景，因此能更稳地保证单用户数据一致性。
-
----
-
-## ⚠️ 功能限制
-
-> [!CAUTION]
-> **脚本相关操作**：
-> 
-> 本项目通过 **QuickJS (WASM)** 为 Sub-Store 的「脚本过滤/脚本操作」提供兼容实现（实验性）。
-> - ✅ 支持 `async/await`（通过 QuickJS Promise + pendingJobs 驱动）
-> - ✅ 默认启用 CPU/内存/栈限制，避免脚本无限循环/内存失控
-> - ⚠️ 仍属于兼容层能力：与 Node 环境不等价，不支持 `require`/本地文件等；宿主工具函数支持同步回调，异步回调暂不支持，Buffer 仅覆盖常用接口。
-> - ⚠️ 大脚本/大数据会有额外开销（需要在宿主与 QuickJS 之间做数据序列化/复制）
-> 
-> 如遇到部分脚本功能无法使用，请查看 [Sub-Store 相关教程](https://xream.notion.site/Sub-Store-abe6a96944724dc6a36833d5c9ab7c87) 将其部署到 VPS/Docker 运行
-
-- **脚本**：QuickJS 兼容实现
-- **GeoIP**: 已实现，需要在仪表盘配置 mmdb 文件 URL
-- **代理请求**: 不可用，但也不需要
-- **推送通知**：支持现有渠道与 Shoutrrr URL；Shoutrrr 使用运行环境的 fetch，要求 GET/HEAD 携带请求体的配置不支持。
-- **DNS**：可使用上游 DoH 解析；不提供任意 UDP DNS 或本地代理内核。
-
----
-
-## 🚀 Cloudflare Workers 快速部署
-
-> [!NOTE]
-> 部署过程完全通过 GitHub 网页操作，**无需修改任何代码文件**。
-> 
-> 每次部署自动从官方仓库拉取最新版本：
-> - 后端：[sub-store-org/Sub-Store](https://github.com/sub-store-org/Sub-Store)（从源码编译，适配 Workers 环境）
-> - 前端：[sub-store-org/Sub-Store-Front-End](https://github.com/sub-store-org/Sub-Store-Front-End)（直接使用 release 的 dist.zip）
-
-### 第一步：Fork 仓库
-
-点击 GitHub 页面右上角的 **Fork** 按钮，将仓库复制到你的账号。
-
-### 第二步：创建 Cloudflare Pages 项目（前端）
-
-如果你想直接使用官方前端，可以跳过此步骤，并且后面的 GitHub Variables 中的 `DEPLOY_SUB_STORE_FRONTEND` 也无需设置。
-
-*建议使用官方前端*
-
-1. 在 Cloudflare Dashboard 选择 **Workers & Pages**
-2. 点击 **Create** → **Pages** → **Direct Upload**
-3. 项目名称填 `sub-store-frontend`
-4. 随便上传一个文件完成创建（后续会自动部署）
-
-### 第三步：获取 Cloudflare API Token
-
-1. 访问 [Cloudflare API Tokens](https://dash.cloudflare.com/profile/api-tokens)
-2. 点击 **Create Token**
-3. 选择 **Custom token**，配置权限：
-   - Account → Workers Scripts → Edit
-   - Account → Cloudflare Pages → Edit
-4. 创建并**复制 Token**
-
-### 第四步：获取 Account ID
-
-1. 打开 [Cloudflare Dashboard](https://dash.cloudflare.com)
-2. 右侧会显示 **Account ID**，复制它
-
-### 第五步：配置 GitHub Secrets / Variables
-
-在你 Fork 的仓库中：
-
-1. 点击 **Settings** → **Secrets and variables** → **Actions**
-2. 点击 **New repository secret**，添加以下 Secrets：
-
-| Secret 名称 | 说明 | 示例 |
-|-------------|------|------|
-| `CF_API_TOKEN` | Cloudflare API Token | `xxxxxxxxx` |
-| `CF_ACCOUNT_ID` | Cloudflare Account ID | `xxxxxxxxx` |
-| `JWT_SECRET` | JWT 签名密钥（必填，建议 32 位以上随机字符串） | `your-long-random-secret` |
-
-3. 点击 **Variables** → **New repository variable**，按需添加以下 Variables：
-
-| Variable 名称 | 说明 | 示例 |
-|---------------|------|------|
-| `DEPLOY_SUB_STORE_FRONTEND` | 是否部署 Sub-Store 前端 (可选，任意值为部署，不设置该变量则不部署前端) | `true` |
-
-### 第六步：触发部署
-
-1. 点击仓库的 **Actions** 标签
-2. 选择 **Deploy to Cloudflare**
-3. 点击 **Run workflow** → **Run workflow**
-
-前端部署规则：
-
-- 自动检查 / 定时任务：只有检测到前端需要更新，且已设置 `DEPLOY_SUB_STORE_FRONTEND` 时，才会部署前端
-- 手动运行：如果将 `deploy_frontend` 选择为 `deploy`，即使没有设置 `DEPLOY_SUB_STORE_FRONTEND`，也会强制部署前端
-- 如果你想一直跳过前端部署，不设置 `DEPLOY_SUB_STORE_FRONTEND`，并在手动运行时选择 `skip` 即可
-
-部署完成后：
-- 后端：`https://sub-store.<your-subdomain>.workers.dev` 或你的域名
-- 前端：请到你的 Cloudflare Pages 项目中查看并绑定域名
-- 控制台：`你的后端域名/dashboard/`
-
----
-
-## 🚀 Deno Deploy 快速部署
-
-Deno Deploy 目前无前端部分
-
-### 第一步：Fork 仓库
-
-点击 GitHub 页面右上角的 **Fork** 按钮，将仓库复制到你的账号。
-
-### 第二步：创建 Deno Deploy 项目
-
-1. 登录 [Deno Deploy](https://console.deno.com/)
-2. 点击 **New Playground**
-3. 点击右上角 **Settings**
-4. 项目名称修改为 `sub-store`
-5. 编辑 **Playground Configuration** 配置
-
-- Install command: `deno install`
-- Build command: `deno task build`
-- Pre-deploy command: `deno task migrate`
-- Entrypoint: `src/deno.js`
-- 其他保持默认
-
-### 第三步：获取 Deno Personal access Token
-
-点击右上角头像进入 **Account Settings**
-
-在 **Personal access tokens** 中创建一个 token (有效期根据需要自定义) 并复制它。
-
-### 第四步：配置 GitHub Secrets / Variables
-
-在你 Fork 的仓库中：
-
-1. 点击 **Settings** → **Secrets and variables** → **Actions**
-2. 点击 **New repository secret**，添加以下 Secrets：
-
-| Secret 名称 | 说明 | 示例 |
-|-------------|------|------|
-| `DENO_DEPLOY_TOKEN` | Deno Deploy Personal access Token | `xxxxxxxxx` |
-| `JWT_SECRET` | JWT 签名密钥（必填，建议 32 位以上随机字符串） | `your-long-random-secret` |
-
-### 第五步：触发部署
-
-1. 点击仓库的 **Actions** 标签
-2. 选择 **Deploy to Deno Deploy**
-3. 点击 **Run workflow** → **Run workflow**
-
-### 第六步：创建数据库
-
-1. 登录 [Deno Deploy](https://console.deno.com/)
-2. 点击 **Databases**
-4. 点击 **Provision database** 选择 **Prisma Postgres**
-5. 数据库创建完成后点击 **Assign** → **Select app** → 选择你的项目名称点击 **Attach database**
-
----
-
-## 👥 多用户管理
-
-首次部署后，访问 `后端域名/dashboard/` 进入管理面板。
-
-初始管理员用户名：admin
-初始管理员密码：admin
-
-登录后请立即更改用户名密码
-
-每个用户拥有独立的 Sub-Store 空间，互不干扰。
-
-### 分享
-
-官方前端可创建订阅、集合和文件分享。公开下载地址为 `/share/:type/:name?token=...`，不会包含后台私有路径。令牌携带用户路由前缀，下载时仍按用户数据中的完整令牌、资源类型及名称验证，支持上游的到期时间、次数限制和撤销。修改令牌前缀不能访问其他用户的资源。
-
-从 Gist 等备份恢复的无前缀旧令牌可继续使用原公开分享路径：入口只读查找唯一所属用户，再按原有有效期和次数校验；同一令牌、类型和名称在多个用户中重复时拒绝访问。旧链接定位需要读取用户数据，建议新建分享使用带用户前缀的链接。Deno 并发修改同一份用户数据时可能返回 409，请重试；Workers 对同一用户的请求排队并等待保存。
-
-
----
-
-## 🔄 自动更新
-
-配置完成后，GitHub Actions 会：
-
-- **每 3 天**自动检查 Sub-Store 官方仓库是否有新版本
-- 如果有更新，自动部署新版本
-- 无需任何手动操作
-
-你也可以随时通过 Actions → Run workflow 手动触发部署。
-
----
-
-## 🛠️ 本地开发
-
-### 前置要求
-
-- Node.js 24
-- package.json 指定版本的 pnpm（安装及 CI 使用提交的锁文件）
-
-### 快速开始
-
-需要先下载 Sub-Store 源码到 `sub-store` 目录并且安装依赖
-
-```bash
-# 安装项目依赖
-pnpm install
-
-# 下载 Sub-Store 源码并安装后端依赖
-pnpm run fetch:substore
-
-# 启动 Workers 开发服务器
-pnpm run dev:workers
-
-# 编译 Workers
-pnpm run build:workers
-
-# 预览(使用与 Workers 相同的环境)
-pnpm run preview:workers
+```text
+https://你的Worker域名/your-private-path
 ```
 
-访问 http://localhost:3000 测试
+打开同域根路径的官方前端，填写这个完整地址。私有路径用于保护管理 API，不要把它当成公开分享地址。
 
-### 可用命令
+公开分享链接使用 `/share/sub/:name`、`/share/col/:name` 或 `/share/file/:name`，并携带 `token`。令牌直接在唯一数据集中按资源类型、名称、有效期和次数验证，不需要用户前缀。恢复外部备份后，已有令牌仍按原值匹配。
 
-| 命令 | 说明 |
-|------|------|
-| `pnpm run build:workers` | 构建 Workers |
-| `pnpm run dev:workers` | 启动 Workers 本地开发服务器 |
-| `pnpm run dev:deno` | 启动 Deno skeleton 服务 |
-| `pnpm run migrate:deno-pg` | 执行 Deno/Postgres schema migration skeleton |
-| `pnpm run preview:workers` | 预览 Workers 构建产物 |
-| `pnpm run deploy:workers:local` | 从本地部署到 Cloudflare |
-| `pnpm run deploy:workers:action` | 从 GitHub Actions 部署到 Cloudflare |
-| `pnpm run install:backend` | 安装 Sub-Store 后端依赖 |
-| `pnpm run fetch:substore` | 下载 Sub-Store 源码并安装后端依赖 |
-| `pnpm run tail` | 实时查看 Cloudflare Worker 生产环境的日志 |
-| `pnpm run prepare:quickjs-wasm` | 准备 QuickJS WASM | 
+## Cloudflare 部署
 
----
+Fork 仓库，在 GitHub Actions 配置：
 
-## 故障排除
+| 配置 | 类型 | 说明 |
+| --- | --- | --- |
+| `CF_API_TOKEN` | Secret | Cloudflare Workers 部署令牌 |
+| `CF_ACCOUNT_ID` | Secret | Cloudflare 账号 ID |
+| `CF_WORKER_NAME` | Secret | 部署目标 Worker 名称 |
+| `SUB_STORE_FRONTEND_BACKEND_PATH` | Secret | 私有后端路径，必须以 `/` 开头且不能为根路径 |
+| `SUB_STORE_PUSH_SERVICE` | Secret，可选 | 通知服务 URL |
+| `MMDB_COUNTRY_URL` | Variable，可选 | Country MMDB 下载地址 |
+| `MMDB_ASN_URL` | Variable，可选 | ASN MMDB 下载地址 |
 
-### 订阅下载超时
+运行 **Deploy to Cloudflare**。同一个 Worker 提供官方前端静态资源与后端 API，不需要独立 Pages 项目，也不包含 Dashboard。
 
-HTTP 适配器遵循上游 Surge 接口的秒数单位，默认 30 秒、项目上限 55 秒，超时覆盖响应体读取；这些是项目策略，并非 Workers HTTP 请求的统一平台时长限制。QuickJS 脚本仍有独立执行期限。
+后端与官方前端均只跟随正式 Release：后端从发布对应的 tag 下载源码构建；前端使用该正式 Release 的 `dist.zip`，不追踪开发分支或预发布版本。
 
----
+## 功能与边界
+
+- QuickJS 支持 async/await、常用 Buffer/文本编码及同步工具函数回调；有独立执行时限、内存和栈限制。
+- 脚本宿主回调暂不支持 async callback，不支持 Node `require`、本地文件和本地代理内核。
+- DNS 可使用上游 DoH；不提供任意 UDP DNS。
+- GeoIP 从配置的 MMDB URL 按需加载，数据库和订阅数据由单库持久化；加载失败会重试，不替换有效的旧 reader。
+- `SUB_STORE_PUSH_SERVICE` 支持 Shoutrrr URL，也支持 HTTP URL 中的 `[推送标题]`、`[推送内容]` 占位符。通知使用 fetch，不支持 GET/HEAD 请求体。
+- HTTP 适配器遵循 Surge 接口的秒数单位，默认 30 秒，项目上限 55 秒，覆盖响应体读取；并非 Workers 的统一平台时长限制。
+- 使用一个 StoreDO 持久化数据，串行处理读改写。
+- 每六小时触发上游产物同步；没有启用的同步项时不操作。不执行每个产物单独配置的 Cron 表达式，这些产物也按全局六小时频率同步。
+
+## 本地开发
+
+需要 Node.js 24 及 `package.json` 指定版本的 pnpm。
+
+```sh
+pnpm install --frozen-lockfile
+pnpm run fetch:substore
+pnpm run fetch:frontend
+cp wrangler.toml.example wrangler.toml
+# 在 wrangler.toml 中配置私有后端路径
+pnpm run dev:workers
+```
+
+依赖使用 `pnpm-lock.yaml`。后端依赖使用对应正式 Release 自带的锁文件。`SUBSTORE_VERSION` 可指定正式发布版本；未指定时获取最新正式 Release。
 
 ## License
 
 [AGPL-3.0](LICENSE)
-
-
-### 构建与验证
-
-根依赖使用 `pnpm-lock.yaml`，Deno 使用 `deno.lock`；Sub-Store 源码仍由 `SUBSTORE_VERSION` 或最新 release 决定，排查问题时应同时记录该 tag。更新上游时运行现有 transform、脚本桥接、分享和运行时聚焦测试，再分别检查 Workers 与 Deno 构建。无需为依赖更新重复运行完整业务测试。
-
-GeoIP 加载失败会退避重试，已加载数据库定期检查元数据更新。Cron 对不同用户做有界并发；Deno 下载日志分批清理，短时间内可略多于 5000 条。

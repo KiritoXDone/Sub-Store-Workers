@@ -1,41 +1,31 @@
-# Sub-Store Workers - wrangler.toml 示例配置
-# 复制此文件为 wrangler.toml 并填写实际配置
-
 name = "sub-store"
 main = "src/workers.js"
 compatibility_date = "2025-11-17"
 compatibility_flags = ["nodejs_compat"]
 
-# 环境变量
 [vars]
 DEBUG = false
-JWT_SECRET = "__JWT_SECRET__"
-
-# Durable Objects（SQLite）
-[[durable_objects.bindings]]
-name = "INDEX_DO"
-class_name = "IndexDO"
+SUB_STORE_FRONTEND_BACKEND_PATH = "__SUB_STORE_FRONTEND_BACKEND_PATH__"
 
 [[durable_objects.bindings]]
-name = "USER_DO"
-class_name = "UserDO"
+name = "STORE_DO"
+class_name = "StoreDO"
 
+# Existing deployments must keep the historical tag before applying v2.
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["IndexDO", "UserDO"]
 
-# Cron 触发器 - 每 6 小时执行一次
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["StoreDO"]
+deleted_classes = ["IndexDO", "UserDO"]
+
 [triggers]
 crons = ["0 */6 * * *"]
 
-# 静态资源配置 - Dashboard
 [assets]
-directory = "./client"
+directory = "./public/frontend"
 binding = "ASSETS"
-
-# 速率限制配置 - 保护登录接口
-[[ratelimits]]
-name = "LOGIN_LIMITER"
-namespace_id = "1001"
-# 每分钟最多 5 次登录尝试
-simple = { limit = 5, period = 60 }
+not_found_handling = "single-page-application"
+run_worker_first = true
