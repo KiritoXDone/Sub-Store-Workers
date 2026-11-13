@@ -1,0 +1,55 @@
+name: Temporary Storage Audit
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Inspect current and legacy storage metadata
+        env:
+          ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          WORKER_NAME: ${{ secrets.CF_WORKER_NAME }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: |
+          node --input-type=module <<'JS'
+          const account = encodeURIComponent(process.env.ACCOUNT_ID);
+          const worker = process.env.WORKER_NAME;
+          if (!worker) throw new Error('Worker name not configured');
+          const base = `https://api.cloudflare.com/client/v4/accounts/${account}`;
+          async function api(path) {
+            const response = await fetch(base+path, {headers:{Authorization:`Bearer ${process.env.CF_API_TOKEN}`},signal:AbortSignal.timeout(20000),redirect:'error'});
+            const payload = await response.json();
+            if (!response.ok || payload.success === false) throw new Error(`HTTP ${response.status}; codes=${(payload.errors||[]).map(e=>e.code).join(',')}`);
+            return payload;
+          }
+          async function list(path) {
+            const rows=[];
+            for(let page=1;page<=1000;page++) {
+              const body=await api(`${path}?page=${page}&per_page=100`);
+              if(!Array.isArray(body.result)) throw new Error('Unexpected storage response');
+              rows.push(...body.result);
+              if(body.result.length<100 || rows.length >= body.result_info?.total_count) return rows;
+            }
+            throw new Error('Incomplete pagination');
+          }
+          const settings=await api(`/workers/scripts/${encodeURIComponent(worker)}/settings`);
+          const bindings=(settings.result.bindings||[]).filter(b=>['durable_object_namespace','d1','kv_namespace','r2_bucket'].includes(b.type)).map(b=>({name:b.name,type:b.type,class:b.class_name,namespace_id:b.namespace_id,database_id:b.database_id,id:b.id,bucket:b.bucket_name}));
+          const results=await Promise.allSettled([list('/workers/durable_objects/namespaces'),list('/d1/database')]);
+          const report={bindings};
+          const ownedOrNamed=n=>n.script===worker || /sub[-_]?store/i.test(n.name||'') || (n.name||'').includes(worker);
+          if(results[0].status==='fulfilled') {
+            const namespaces=results[0].value;
+            report.durableObjects={total:namespaces.length,candidates:namespaces.filter(ownedOrNamed).map(n=>({id:n.id,name:n.name,class:n.class,owned:n.script===worker,sqlite:n.use_sqlite})),currentLegacyClasses:namespaces.filter(n=>n.script===worker&&['IndexDO','UserDO'].includes(n.class)).map(n=>n.class)};
+          } else report.durableObjects={error:results[0].reason.message};
+          if(results[1].status==='fulfilled') {
+            const databases=results[1].value;
+            report.d1={total:databases.length,candidates:databases.filter(ownedOrNamed).map(d=>({id:d.uuid,name:d.name,created_at:d.created_at}))};
+          } else report.d1={error:results[1].reason.message};
+          console.log('STORAGE_AUDIT '+JSON.stringify(report));
+          JS
