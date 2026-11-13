@@ -49,7 +49,7 @@ jobs:
         run: pnpm run install:backend
 
       - name: Test runtime adapters
-        run: node --test scripts/test-share.mjs scripts/test-quickjs-engine.mjs scripts/test-shoutrrr-notification.mjs scripts/test-runtime.mjs scripts/test-resource-cache.mjs
+        run: node --test scripts/test-share.mjs scripts/test-quickjs-engine.mjs scripts/test-shoutrrr-notification.mjs scripts/test-runtime.mjs scripts/test-resource-cache.mjs scripts/test-legacy-share-user.mjs
 
       - name: Configure wrangler.toml
         run: |

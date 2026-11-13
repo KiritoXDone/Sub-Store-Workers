@@ -8,6 +8,7 @@ import { mergeSystemSettings, mergeSystemSettingsPatch } from '../dataOfficer/sy
 import { getSettings } from '../../molecules/index/getSettings.js';
 import { patchSettings } from '../../molecules/index/patchSettings.js';
 import { getUserById } from '../../molecules/index/getUserById.js';
+import { findLegacyShareUser } from '../../molecules/index/findLegacyShareUser.js';
 import { getUserByPath } from '../../molecules/index/getUserByPath.js';
 import { listUsers } from '../../molecules/index/listUsers.js';
 import { updateAvatar } from '../../molecules/index/updateAvatar.js';
@@ -39,6 +40,8 @@ export async function handle({ request, env, storage, requestId, services }) {
     }
 
     if (route.kind === 'user-by-id') return await getUserById({ route, indexGateway });
+
+    if (route.kind === 'legacy-share-user') return await findLegacyShareUser({ request, indexGateway, userGateway });
 
     if (route.kind === 'user-by-path') {
         return await getUserByPath({ request, env, storage, requestId, route, indexGateway });

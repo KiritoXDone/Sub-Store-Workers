@@ -201,7 +201,7 @@ export async function getUserDataFromUserDo({ env, userId, requestId }) {
     setRequestIdHeader(headers, requestId);
     const url = new URL(USER_ENDPOINTS.USER_DATA, USER_ORIGIN).toString();
     const resp = await stub.fetch(url, { method: 'GET', headers });
-    if (!resp.ok) return null;
+    if (!resp.ok) throw new Error(`User data lookup failed: HTTP ${resp.status}`);
     const body = await resp.json();
     return body?.data ?? null;
 }
@@ -249,4 +249,16 @@ export async function getAccessLogFromUserDo({ env, userId, limit, beforeId, req
 
 export async function fetchAsset({ requestOrUrl, env }) {
     return await env.ASSETS.fetch(requestOrUrl);
+}
+
+export async function findLegacyShareUserFromIndexDo({ env, token, type, name, requestId }) {
+    const id = env.INDEX_DO.idFromName('index');
+    const headers = new Headers({ 'Content-Type': 'application/json' });
+    setRequestIdHeader(headers, requestId);
+    const response = await env.INDEX_DO.get(id).fetch('https://index/_internal/index/user/by-legacy-share', {
+        method: 'POST', headers, body: JSON.stringify({ token, type, name }),
+    });
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error(`Legacy share lookup failed: HTTP ${response.status}`);
+    return await response.json();
 }

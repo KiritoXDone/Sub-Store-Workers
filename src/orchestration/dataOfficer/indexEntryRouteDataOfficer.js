@@ -30,6 +30,10 @@ export function parseIndexEntryRoute(request) {
         return { kind: 'user-by-id', userId: Number(url.searchParams.get('id')) };
     }
 
+    if (path === '/_internal/index/user/by-legacy-share' && method === 'POST') {
+        return { kind: 'legacy-share-user' };
+    }
+
     if (path === INDEX_ENDPOINTS.USERS_LIST && method === 'GET') {
         const afterId = parseInt(url.searchParams.get('afterId') || '0', 10) || 0;
         const limit = parseInt(url.searchParams.get('limit') || '200', 10) || 200;

@@ -39,6 +39,19 @@ export function createEntryGatewayForDeno({
             return await ctx.services.indexGateway.getUserById(userId);
         },
 
+        async findLegacyShareUser({ token, type, name, requestId }) {
+            const ctx = await ensureIndexContext();
+            const request = new Request('https://deno/_internal/index/user/by-legacy-share', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token, type, name }),
+            });
+            setRequestIdHeader(request.headers, requestId);
+            const response = await ctx.handleIndexEntry({ request, env: ctx.env, pool: ctx.pool, services: ctx.services });
+            if (response.status === 404) return null;
+            if (!response.ok) throw new Error(`Legacy share lookup failed: HTTP ${response.status}`);
+            return await response.json();
+        },
+
         async forwardSubStoreRequest({ request, user, requestId, preservePath = false }) {
             const ctx = await ensureUserContext();
             const originalUrl = new URL(request.url);

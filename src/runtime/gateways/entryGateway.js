@@ -13,6 +13,7 @@
  * @property {(args: { request: Request, requestId: string }) => Promise<Response>} forwardDashboardApi
  * @property {(args: { requestOrUrl: Request|string|URL }) => Promise<Response>} fetchDashboardAsset
  * @property {(args: { userPath: string, requestId: string }) => Promise<Record<string, unknown>|null>} getUserByPath
+ * @property {(args: { token: string, type: string, name: string, requestId: string }) => Promise<Record<string, unknown>|null>} findLegacyShareUser
  * @property {(args: { userId: number, requestId: string }) => Promise<Record<string, unknown>|null>} getUserById
  * @property {(args: { request: Request, user: Record<string, unknown>, requestId: string, preservePath?: boolean }) => Promise<Response>} forwardSubStoreRequest
  * @property {(args: { requestId: string }) => Promise<Record<string, unknown>>} getSettings
