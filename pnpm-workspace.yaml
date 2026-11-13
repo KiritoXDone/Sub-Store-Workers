@@ -1,6 +1,7 @@
 packages:
   - '**'
   - '!packages/quickjs-capabilities'
+  - '!sub-store/**'
 
 allowBuilds:
   esbuild: true
