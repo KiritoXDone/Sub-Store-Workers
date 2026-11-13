@@ -22,10 +22,9 @@ src/platform/workers/runtime/wasm/*.wasm.map.txt
 .dev.vars
 wrangler.toml
 
-# Lock files (use your own package manager)
+# Other package manager lock files
 bun.lock
 package-lock.json
-pnpm-lock.yaml
 
 # OS files
 .DS_Store

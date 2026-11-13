@@ -1,17 +1,17 @@
 /**
  * QuickJS module loader for Deno.
  *
- * Deno 侧不直接 import 本地复制的 wasm 文件，而是使用 quickjs-emscripten
- * 官方变体定义，让包自身接管 wasm 装载。
+ * Deno 侧不直接 import 本地复制的 wasm 文件，而是让官方变体接管 wasm 装载。
  */
 
-import { newQuickJSWASMModule, RELEASE_SYNC } from 'npm:quickjs-emscripten';
+import { newQuickJSWASMModuleFromVariant } from 'npm:quickjs-emscripten-core@0.32.0';
+import RELEASE_SYNC from 'npm:@jitl/quickjs-wasmfile-release-sync@0.32.0';
 
 let quickJsModulePromise = null;
 
 export async function getQuickJsModuleForDeno() {
     if (!quickJsModulePromise) {
-        quickJsModulePromise = newQuickJSWASMModule(RELEASE_SYNC);
+        quickJsModulePromise = newQuickJSWASMModuleFromVariant(RELEASE_SYNC);
     }
     return await quickJsModulePromise;
 }

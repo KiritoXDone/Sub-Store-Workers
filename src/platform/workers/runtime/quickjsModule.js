@@ -4,7 +4,8 @@
  * Workers 侧继续使用本地复制到 src/ 下的 wasm 模块，交给构建器处理。
  */
 
-import { newQuickJSWASMModule, newVariant, RELEASE_SYNC as baseVariant } from 'quickjs-emscripten';
+import { newQuickJSWASMModuleFromVariant, newVariant } from 'quickjs-emscripten-core';
+import baseVariant from '@jitl/quickjs-wasmfile-release-sync';
 import wasmModule from './wasm/RELEASE_SYNC.wasm';
 
 let quickJsModulePromise = null;
@@ -14,7 +15,7 @@ export async function getQuickJsModuleForWorkers() {
         const variant = newVariant(baseVariant, {
             wasmModule,
         });
-        quickJsModulePromise = newQuickJSWASMModule(variant);
+        quickJsModulePromise = newQuickJSWASMModuleFromVariant(variant);
     }
     return await quickJsModulePromise;
 }

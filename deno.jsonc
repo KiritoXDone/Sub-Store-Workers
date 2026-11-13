@@ -12,13 +12,13 @@
     "migrate": "deno run -A scripts/deno-postgres-migrate.mjs",
     "dev": "npm run prepare:quickjs-wasm && deno task build:substore-deno && deno run -A src/deno.js",
     "fetch:substore": "bash scripts/fetch-substore.sh && deno task install:backend",
-    "install:backend": "cd sub-store/backend && npm install --ignore-scripts",
+    "install:backend": "cd sub-store/backend && npx --yes pnpm@11.0.9 install --frozen-lockfile --ignore-scripts",
     "deploy:local": "deno deploy --app sub-store --prod --allow-node-modules"
   },
   "allowScripts": [
-    "npm:esbuild@0.27.3",
+    "npm:esbuild@0.28.2",
     "npm:fsevents@2.3.3",
-    "npm:sharp@0.34.5",
-    "npm:workerd@1.20260301.1"
+    "npm:sharp@0.35.5",
+    "npm:workerd@1.20261110.1"
   ]
 }

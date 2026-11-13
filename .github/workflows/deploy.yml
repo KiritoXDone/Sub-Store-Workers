@@ -104,8 +104,6 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
-        with:
-          version: latest
 
       - name: Download Sub-Store Source Code
         env:
@@ -136,7 +134,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: build
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
       - name: Inject commit info
         working-directory: build
