@@ -85,6 +85,7 @@ test('share feature exposes the configured single-store secret path', () => {
         const res = { set() { return this; }, send(data) { response = JSON.parse(data); } };
         getEnv({ query: {} }, res);
         assert.equal(response.data.feature.share, true);
+        assert.equal(response.data.isWorker, true);
         assert.equal(response.data.meta.node.env.SUB_STORE_FRONTEND_BACKEND_PATH, '/only-secret');
     } finally { globalThis.__substore_get_active_context__ = old; }
 });

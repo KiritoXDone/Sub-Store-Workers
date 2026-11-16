@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { subStoreTransformPlugin } from '../vite.substore-transform.js';
+import { markWorkerEnvironment } from './substore-environment-transform.mjs';
+
+test('Worker identity is added without changing upstream platform flags', () => {
+    const source = 'export function ENV() { return { isSurge: true, isNode: false }; }';
+    const transformed = markWorkerEnvironment(source).replace('export function', 'function');
+    assert.deepEqual(new Function(transformed + '; return ENV();')(), { isWorker: true, isSurge: true, isNode: false });
+    assert.throws(() => markWorkerEnvironment('export function ENV() { return { isWorker: false }; }'), /requires review/);
+});
 
 function transformEnvironment(surgeExpression) {
     const source = `

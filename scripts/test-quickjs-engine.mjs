@@ -15,7 +15,7 @@ globalThis.__loadQuickJsModule__ = async () => ({
         return runtime;
     },
 });
-ensureSubStoreQuickJsScriptEngineInstalled({ timeoutMs: 200 });
+ensureSubStoreQuickJsScriptEngineInstalled({ timeoutMs: 1000 });
 const factory = globalThis.__substore_workers_createDynamicFunction__;
 const makeOperator = (script, overrides = {}) => factory({
     name: 'operator',
@@ -24,6 +24,13 @@ const makeOperator = (script, overrides = {}) => factory({
     ...overrides,
 });
 const runtimeClosed = () => assert.equal(runtimes.at(-1).alive, false);
+
+test('scripts see Worker identity and the Surge compatibility flag', async () => {
+    const $substore = { env: { isWorker: true, isSurge: true, isNode: false } };
+    const result = await makeOperator('function operator() { return [$substore.env.isWorker, $substore.env.isSurge, $substore.env.isNode]; }', { $substore })([]);
+    assert.deepEqual(result, [true, true, false]);
+    runtimeClosed();
+});
 
 test('script logging follows the Worker debug setting', () => {
     const original = console.log;

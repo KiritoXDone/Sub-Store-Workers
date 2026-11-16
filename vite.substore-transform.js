@@ -4,6 +4,7 @@ import peggy from 'peggy';
 import { parse } from 'acorn';
 import { transformShareSupport } from './scripts/substore-share-transform.mjs';
 import { transformResourceCache } from './scripts/substore-cache-transform.mjs';
+import { markWorkerEnvironment } from './scripts/substore-environment-transform.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -125,6 +126,7 @@ export default function getParser() {
             }
 
             if (id.endsWith('/vendor/open-api.js')) {
+                contents = markWorkerEnvironment(contents);
                 const cloneOptions = 'const opts = JSON.parse(JSON.stringify(options));';
                 if (contents.includes('function HTTP(') && !contents.includes(cloneOptions)) {
                     this.error('[sub-store-transform] HTTP options clone changed; AbortSignal patch not applied');
