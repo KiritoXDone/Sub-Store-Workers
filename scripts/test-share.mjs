@@ -4,6 +4,23 @@ import test from 'node:test';
 import { parse } from 'acorn';
 import { transformShareSupport } from './substore-share-transform.mjs';
 
+test('share transform supports old and current upstream guards and secure token generation', async () => {
+    const variants = [
+        { guard: '!ENV().isNode', generator: '', assignment: 'nanoid.customAlphabet(nanoid.urlAlphabet)()' },
+        { guard: '!ENV().isNode && !ENV().isSubsCheckPro', generator: 'function generateShareToken() { return "insecure"; }', assignment: 'generateShareToken()' },
+    ];
+    for (const variant of variants) {
+        const source = `${variant.generator}\nasync function signToken() { if (${variant.guard}) { return failed('INVALID_ENV'); } return 'ok'; }\nfunction createTokenItem(payload) { let token = payload?.token; if (!token) { token = ${variant.assignment}; } return token; }`;
+        const transformed = transformShareSupport(source, '/restful/token.js');
+        const api = new Function(transformed + ';return {signToken, createTokenItem};')();
+        assert.equal(await api.signToken(), 'ok');
+        assert.match(api.createTokenItem({}), /^[a-f0-9]{32}$/);
+        assert.equal(api.createTokenItem({ token: 'existing' }), 'existing');
+    }
+    const unsupported = `async function signToken() { if (!ENV().isAdmin) { return failed('INVALID_ENV'); } }`;
+    assert.throws(() => transformShareSupport(unsupported, '/restful/token.js'), /environment guard changed/);
+});
+
 function loadTokenApi() {
     let source = transformShareSupport(readFileSync(new URL('../sub-store/backend/src/restful/token.js', import.meta.url), 'utf8'), '/restful/token.js');
     const ast = parse(source, { ecmaVersion: 'latest', sourceType: 'module' });
@@ -58,7 +75,9 @@ test('share feature exposes the configured single-store secret path', () => {
     const source = transformShareSupport(readFileSync(new URL('../sub-store/backend/src/restful/miscs.js', import.meta.url), 'utf8'), '/restful/miscs.js');
     const ast = parse(source, { ecmaVersion: 'latest', sourceType: 'module' });
     const node = ast.body.find(item => item.type === 'FunctionDeclaration' && item.id?.name === 'getEnv');
-    const getEnv = new Function('baseEnv', source.slice(node.start, node.end) + ';return getEnv;')({ feature: {}, meta: {} });
+    const getEnv = new Function('baseEnv', 'ENV', 'DEFAULT_FRONTEND_URL', source.slice(node.start, node.end) + ';return getEnv;')(
+        { feature: {}, meta: {} }, () => ({ isSubsCheckPro: false }), 'https://example.test',
+    );
     const old = globalThis.__substore_get_active_context__;
     globalThis.__substore_get_active_context__ = () => ({ env: { SUB_STORE_FRONTEND_BACKEND_PATH: ' /only-secret/ ' } });
     try {

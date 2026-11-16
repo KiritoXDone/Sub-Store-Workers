@@ -10,12 +10,22 @@ export function transformShareSupport(source, id) {
         const ast = parse(source, { ecmaVersion: 'latest', sourceType: 'module' });
         const sign = ast.body.find((node) => node.type === 'FunctionDeclaration' && node.id?.name === 'signToken');
         const guard = sign?.body.body[0];
-        if (guard?.type !== 'IfStatement' || source.slice(guard.test.start, guard.test.end) !== '!ENV().isNode') {
+        const condition = guard?.test && source.slice(guard.test.start, guard.test.end).replace(/\s+/g, '');
+        if (guard?.type !== 'IfStatement' || guard.alternate ||
+            guard.consequent?.body?.length !== 1 || guard.consequent.body[0].type !== 'ReturnStatement' ||
+            !['!ENV().isNode', '!ENV().isNode&&!ENV().isSubsCheckPro'].includes(condition)) {
             throw new Error('[sub-store-share] signToken environment guard changed');
         }
         source = source.slice(0, guard.start) + source.slice(guard.end);
         if (!source.includes('let token = payload?.token;')) throw new Error('[sub-store-share] token payload changed');
-        source = replaceRequired(source, 'token = nanoid.customAlphabet(nanoid.urlAlphabet)();', "token = crypto.randomUUID().replace(/-/g, '');");
+        const updated = parse(source, { ecmaVersion: 'latest', sourceType: 'module' });
+        const generator = updated.body.find((node) => node.type === 'FunctionDeclaration' && node.id?.name === 'generateShareToken');
+        if (generator) {
+            if (!source.includes('token = generateShareToken();')) throw new Error('[sub-store-share] token generator call changed');
+            source = source.slice(0, generator.start) + "function generateShareToken() { return crypto.randomUUID().replace(/-/g, ''); }" + source.slice(generator.end);
+        } else {
+            source = replaceRequired(source, 'token = nanoid.customAlphabet(nanoid.urlAlphabet)();', "token = crypto.randomUUID().replace(/-/g, '');");
+        }
         return source;
     }
     if (id.endsWith('/restful/miscs.js')) {

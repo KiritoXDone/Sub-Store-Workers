@@ -39,6 +39,22 @@ const first = await request(share);
 success(first);
 assert.match(first.text, /example.com/);
 assert.equal((await request(share)).status, 404);
+const collectionName = name + '-collection';
+const fileName = name + '-file';
+success(await request(prefix + '/api/collections', { name: collectionName, subscriptions: [name] }));
+success(await request(prefix + '/api/files', { name: fileName, source: 'local', content: 'local file fixture' }));
+for (const [type, resource, expected] of [
+    ['col', collectionName, /example.com/],
+    ['file', fileName, /local file fixture/],
+]) {
+    const shared = success(await request(prefix + '/api/token', { payload: { type, name: resource }, options: { mode: 'count', count: 1 } }));
+    const url = `/share/${type}/${resource}?target=JSON&token=${encodeURIComponent(shared.token)}`;
+    assert.equal((await request(url.replace(resource, resource + '-wrong'))).status, 404);
+    const firstResponse = await request(url);
+    success(firstResponse);
+    assert.match(firstResponse.text, expected);
+    assert.equal((await request(url)).status, 404);
+}
 const backup = await request(prefix + '/api/storage');
 success(backup);
 assert.match(backup.text, new RegExp(name));
@@ -52,5 +68,7 @@ success(restoredDownload);
 assert.match(restoredDownload.text, /restored/);
 success(await request(prefix + '/api/sub/' + restoredName + '?mode=permanent', undefined, 'DELETE'));
 
+success(await request(prefix + '/api/collection/' + collectionName + '?mode=permanent', undefined, 'DELETE'));
+success(await request(prefix + '/api/file/' + fileName + '?mode=permanent', undefined, 'DELETE'));
 success(await request(prefix + '/api/sub/' + name + '?mode=permanent', undefined, 'DELETE'));
-console.log('PASS: no Dashboard/auth, private single store, scripted conversion, share count, backup and restore');
+console.log('PASS: private single store, scripted conversion, subscription/collection/file sharing, backup and restore');
