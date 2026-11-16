@@ -1,13 +1,51 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { parse } from 'acorn';
 import { subStoreTransformPlugin } from '../vite.substore-transform.js';
-import { markWorkerEnvironment } from './substore-environment-transform.mjs';
+import { enableWorkerBranches, markWorkerBackend, markWorkerEnvironment } from './substore-environment-transform.mjs';
 
 test('Worker identity is added without changing upstream platform flags', () => {
-    const source = 'export function ENV() { return { isSurge: true, isNode: false }; }';
+    const source = 'export function ENV() { return { isSurge: false, isNode: false }; }';
     const transformed = markWorkerEnvironment(source).replace('export function', 'function');
-    assert.deepEqual(new Function(transformed + '; return ENV();')(), { isWorker: true, isSurge: true, isNode: false });
+    assert.deepEqual(new Function(transformed + '; return ENV();')(), { isWorker: true, isSurge: false, isNode: false });
     assert.throws(() => markWorkerEnvironment('export function ENV() { return { isWorker: false }; }'), /requires review/);
+});
+
+test('Worker enters shared adapter branches without enabling Surge-only options', () => {
+    const source = `
+function shared(isSurge, isEgern, isWorker) { if (isSurge || isEgern) return 'adapter'; return 'none'; }
+function surgeOnly(isSurge, isWorker) { if (isSurge) return 'policy'; return 'none'; }
+`;
+    const transformed = enableWorkerBranches(source, 'isWorker', 1);
+    const api = new Function(transformed + '; return { shared, surgeOnly };')();
+    assert.equal(api.shared(false, false, true), 'adapter');
+    assert.equal(api.surgeOnly(false, true), 'none');
+    assert.throws(() => enableWorkerBranches('if (isSurge && enabled) {}', 'isWorker'), /requires review/);
+    assert.throws(() => enableWorkerBranches('if (isSurge || isVercel) {}', 'isWorker'), /requires review/);
+    assert.equal(markWorkerBackend("let backend = 'Node';"), "let backend = 'Workers';");
+});
+
+test('upstream notifications and done use the Worker branch with Surge disabled', () => {
+    const upstream = readFileSync(new URL('../sub-store/backend/src/vendor/open-api.js', import.meta.url), 'utf8');
+    const source = enableWorkerBranches(upstream, 'isWorker', 9);
+    const ast = parse(source, { ecmaVersion: 'latest', sourceType: 'module' });
+    const openApi = ast.body.find((node) => node.type === 'ExportNamedDeclaration' && node.declaration?.id?.name === 'OpenAPI')?.declaration;
+    const methods = ['notify', 'done'].map((name) => openApi?.body.body.find((method) => method.key?.name === name));
+    assert.ok(methods.every(Boolean));
+    const calls = [];
+    const WorkerOpenAPI = new Function('isQX', 'isLoon', 'isSurge', 'isEgern', 'isNode', 'isGUIforCores', 'isWorker', '$notification', '$done',
+        `return class { ${methods.map((method) => source.slice(method.start, method.end)).join('\n')} };`)(
+        false, false, false, false, false, false, true,
+        { post: (...args) => calls.push(['notify', ...args]) }, (value) => calls.push(['done', value]),
+    );
+    const api = new WorkerOpenAPI();
+    api.notify('title', 'subtitle', 'content');
+    api.done({ body: 'result' });
+    assert.deepEqual(calls, [
+        ['notify', 'title', 'subtitle', 'content', { url: undefined }],
+        ['done', { body: 'result' }],
+    ]);
 });
 
 function transformEnvironment(surgeExpression) {
@@ -26,12 +64,12 @@ export class OpenAPI {
 `;
     const plugin = subStoreTransformPlugin();
     const result = plugin.transform.call({ error(message) { throw new Error(message); } }, source, '/sub-store/backend/src/vendor/open-api.js');
-    return new Function(result.code.replace('export class OpenAPI', 'class OpenAPI') + '\nreturn { isSurge, isNode };')();
+    return new Function(result.code.replace('export class OpenAPI', 'class OpenAPI') + '\nreturn { isWorker, isSurge, isNode };')();
 }
 
 for (const suffix of ['', ' && !isEgern']) {
-    test(`Workers uses the Surge HTTP/persistence adapter${suffix ? ' with Egern detection' : ''}`, () => {
-        assert.deepEqual(transformEnvironment(`typeof $httpClient !== 'undefined' && !isLoon${suffix}`), { isSurge: true, isNode: false });
+    test(`Workers uses its own HTTP/persistence branch${suffix ? ' with Egern detection' : ''}`, () => {
+        assert.deepEqual(transformEnvironment(`typeof $httpClient !== 'undefined' && !isLoon${suffix}`), { isWorker: true, isSurge: false, isNode: false });
     });
 }
 

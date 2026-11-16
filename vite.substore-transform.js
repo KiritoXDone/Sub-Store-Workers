@@ -4,7 +4,7 @@ import peggy from 'peggy';
 import { parse } from 'acorn';
 import { transformShareSupport } from './scripts/substore-share-transform.mjs';
 import { transformResourceCache } from './scripts/substore-cache-transform.mjs';
-import { markWorkerEnvironment } from './scripts/substore-environment-transform.mjs';
+import { enableWorkerBranches, markWorkerBackend, markWorkerEnvironment } from './scripts/substore-environment-transform.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -127,6 +127,8 @@ export default function getParser() {
 
             if (id.endsWith('/vendor/open-api.js')) {
                 contents = markWorkerEnvironment(contents);
+                const fullUpstream = contents.includes('const isQX = typeof $task');
+                contents = enableWorkerBranches(contents, 'isWorker', fullUpstream ? 9 : 0);
                 const cloneOptions = 'const opts = JSON.parse(JSON.stringify(options));';
                 if (contents.includes('function HTTP(') && !contents.includes(cloneOptions)) {
                     this.error('[sub-store-transform] HTTP options clone changed; AbortSignal patch not applied');
@@ -153,7 +155,7 @@ export default function getParser() {
             contents = replaceEvalRequire(contents, 'stream/promises', 'globalThis.__stream_promises_shim__');
 
             contents = contents.replace(/const\s+isNode\s*=\s*eval\s*\(\s*`typeof\s+process\s*!==\s*"undefined"`\s*\)/g, 'const isNode = false');
-            contents = contents.replace(/const\s+isSurge\s*=\s*typeof\s+\$httpClient\s*!==\s*['"]undefined['"]\s*&&\s*!isLoon(?:\s*&&\s*!isEgern)?\s*;/g, 'const isSurge = true;');
+            contents = contents.replace(/const\s+isSurge\s*=\s*typeof\s+\$httpClient\s*!==\s*['"]undefined['"]\s*&&\s*!isLoon(?:\s*&&\s*!isEgern)?\s*;/g, 'const isSurge = false; const isWorker = true;');
 
             assertNoDangerousRequireResidue(contents, id, this);
 
@@ -167,6 +169,10 @@ export default function getParser() {
                 }
             }
 
+            if (id.endsWith('/utils/env.js')) {
+                contents = markWorkerBackend(contents);
+            }
+
             if (id.includes('sub-store/backend/src/core/proxy-utils/parsers/peggy/')) {
                 const precompiled = precompilePeggyParser(contents, id, this);
                 if (precompiled !== null) contents = precompiled;
@@ -174,6 +180,7 @@ export default function getParser() {
 
             if (id.includes('vendor/express.js')) {
                 expressFileSeen = true;
+                contents = enableWorkerBranches(contents, 'ENV().isWorker', 1);
                 const before = contents;
                 if (!contents.includes('__SUB_STORE_WORKERS_PATCH__REQUEST_DONE_DISPATCH__')) {
                     contents = contents.replace(
@@ -296,8 +303,8 @@ function __emitDone__(requestId, response) {
                     this.error('[sub-store-transform] open-api.js 环境检测补丁未生效：isNode 仍可能触发 eval()');
                 }
                 const needsIsSurgePatch = beforeOpenApi.includes('const isSurge = typeof $httpClient');
-                if (needsIsSurgePatch && !contents.includes('const isSurge = true;')) {
-                    this.error('[sub-store-transform] open-api.js 环境检测补丁未生效：isSurge 未被固定为 true');
+                if (needsIsSurgePatch && !contents.includes('const isSurge = false;')) {
+                    this.error('[sub-store-transform] open-api.js 环境检测补丁未生效：isSurge 未被固定为 false');
                 }
 
                 if (contents.includes('export class OpenAPI')) {

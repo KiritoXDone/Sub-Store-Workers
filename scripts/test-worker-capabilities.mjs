@@ -5,6 +5,14 @@ const worker = process.argv[2] || 'http://127.0.0.1:3000';
 const prefix = process.env.SUB_STORE_FRONTEND_BACKEND_PATH || '/local-test-backend';
 assert.ok(['localhost', '127.0.0.1'].includes(new URL(worker).hostname), 'Only run this fixture against a local Worker');
 const server = createServer((request, response) => {
+    if (request.url === '/subscription') {
+        response.end('ss://YWVzLTEyOC1nY206cGFzcw@example.com:443#remote');
+        return;
+    }
+    if (request.url === '/bridge') {
+        response.end('bridge-ok');
+        return;
+    }
     if (request.url === '/slow') {
         response.writeHead(200, { 'Content-Type': 'text/plain' });
         response.write('part');
@@ -22,7 +30,7 @@ const server = createServer((request, response) => {
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const echo = `http://127.0.0.1:${server.address().port}/echo`;
 const script = `async function operator(nodes) {
-    if (!$substore.env.isWorker || !$substore.env.isSurge || $substore.env.isNode) throw new Error('worker environment');
+    if (!$substore.env.isWorker || $substore.env.isSurge || $substore.env.isNode) throw new Error('worker environment');
     const url = new URL('https://example.com/?q=ok');
     url.searchParams.set('extra', 'a b');
     if (url.searchParams.get('q') !== 'ok' || !url.search.includes('a+b')) throw new Error('URL');
@@ -77,7 +85,26 @@ try {
     assert.equal(response.status, 200, JSON.stringify(body));
     assert.equal(body.status, 'success', JSON.stringify(body));
     assert.equal(body.data?.processed?.[0]?.name, 'CAPABILITIES_OK', JSON.stringify(body));
-    console.log('PASS: Worker preview runs URL, require/import, Buffer, Web Crypto, File/FormData, fetch, streams and abort');
+    const remote = new URL('/subscription', echo).href;
+    const bridge = new URL('/bridge', echo).href;
+    const compatibilityScript = `async function operator(nodes) {
+        const result = await $substore.http.get({ url: ${JSON.stringify(bridge)}, timeout: 3000 });
+        if (result.body !== 'bridge-ok') throw new Error('HTTP adapter');
+        $substore.write('ok', '#worker-compat-check');
+        if ($substore.read('#worker-compat-check') !== 'ok') throw new Error('persistent store');
+        $substore.delete('#worker-compat-check');
+        nodes[0].name = 'WORKER_COMPAT_OK'; return nodes;
+    }`;
+    const remoteResponse = await fetch(worker + prefix + '/api/preview/sub?target=JSON', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'worker-compatibility', source: 'remote', url: remote,
+            process: [{ type: 'Script Operator', args: { mode: 'script', content: compatibilityScript } }] }),
+    });
+    const remoteBody = await remoteResponse.json();
+    assert.equal(remoteResponse.status, 200, JSON.stringify(remoteBody));
+    assert.equal(remoteBody.status, 'success', JSON.stringify(remoteBody));
+    assert.equal(remoteBody.data?.processed?.[0]?.name, 'WORKER_COMPAT_OK', JSON.stringify(remoteBody));
+    console.log('PASS: Worker preview runs sandbox APIs and upstream HTTP/persistence adapters');
 } finally {
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
