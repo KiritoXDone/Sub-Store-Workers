@@ -34,7 +34,7 @@ export async function prepareSubStoreRuntime({ env, state, requestId }) {
     const lifetime = state?.waitUntil ? { waitUntil: (task) => state.waitUntil(task) } : undefined;
     return {
         notification: createNotificationGateway(env?.SUB_STORE_PUSH_SERVICE, lifetime),
-        environment: { language: 'zh-Hans' },
+        environment: { 'surge-version': '5.0.0', 'surge-build': '2000', language: 'zh-Hans' },
     };
 }
 

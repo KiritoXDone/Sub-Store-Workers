@@ -139,7 +139,6 @@ function resolveCallable(rootMap, path) {
 function buildEnvSnapshot($substore) {
     const env = $substore?.env && typeof $substore.env === 'object' ? $substore.env : {};
     const snapshot = {
-        isWorker: !!env.isWorker,
         isSurge: !!env.isSurge,
         isLoon: !!env.isLoon,
         isQuanX: !!env.isQuanX,

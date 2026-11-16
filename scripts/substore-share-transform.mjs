@@ -32,7 +32,7 @@ export function transformShareSupport(source, id) {
         source = replaceRequired(source, "import env from '@/utils/env';", "import baseEnv from '@/utils/env';");
         return replaceRequired(source, 'function getEnv(req, res) {', `function getEnv(req, res) {
     const secretPath = String(globalThis.__substore_get_active_context__?.()?.env?.SUB_STORE_FRONTEND_BACKEND_PATH || '/').trim().replace(new RegExp('/+$'), '') || '/';
-    const env = { ...baseEnv, isWorker: true, feature: { ...baseEnv.feature, share: true },
+    const env = { ...baseEnv, feature: { ...baseEnv.feature, share: true },
         meta: { ...baseEnv.meta, node: { ...baseEnv.meta?.node, env: { ...baseEnv.meta?.node?.env, SUB_STORE_FRONTEND_BACKEND_PATH: secretPath } } } };`);
     }
     if (id.endsWith('/restful/index.js')) {

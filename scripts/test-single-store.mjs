@@ -24,8 +24,7 @@ for (const path of ['/dashboard/', '/api/dashboard/auth/login', '/api/subs']) {
 }
 const info = success(await request(prefix + '/api/utils/env'));
 assert.equal(info.feature.share, true);
-assert.equal(info.isWorker, true);
-assert.equal(info.backend, 'Workers');
+assert.equal(info.backend, 'Surge');
 assert.equal(info.meta.node.env.SUB_STORE_FRONTEND_BACKEND_PATH, prefix);
 success(await request(prefix + '/api/subs', {
     name, source: 'local', content: 'ss://YWVzLTEyOC1nY206cGFzcw@example.com:443#node',

@@ -30,7 +30,7 @@ const server = createServer((request, response) => {
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const echo = `http://127.0.0.1:${server.address().port}/echo`;
 const script = `async function operator(nodes) {
-    if (!$substore.env.isWorker || $substore.env.isSurge || $substore.env.isNode) throw new Error('worker environment');
+    if ('isWorker' in $substore.env || !$substore.env.isSurge || $substore.env.isNode) throw new Error('surge compatibility environment');
     const url = new URL('https://example.com/?q=ok');
     url.searchParams.set('extra', 'a b');
     if (url.searchParams.get('q') !== 'ok' || !url.search.includes('a+b')) throw new Error('URL');

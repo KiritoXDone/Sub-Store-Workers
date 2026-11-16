@@ -25,9 +25,9 @@ const makeOperator = (script, overrides = {}) => factory({
 });
 const runtimeClosed = () => assert.equal(runtimes.at(-1).alive, false);
 
-test('scripts identify Workers without claiming Surge or Node', async () => {
-    const $substore = { env: { isWorker: true, isSurge: false, isNode: false } };
-    const result = await makeOperator('function operator() { return [$substore.env.isWorker, $substore.env.isSurge, $substore.env.isNode]; }', { $substore })([]);
+test('scripts see only the Surge compatibility environment', async () => {
+    const $substore = { env: { isSurge: true, isNode: false } };
+    const result = await makeOperator("function operator() { return [$substore.env.isSurge, $substore.env.isNode, 'isWorker' in $substore.env]; }", { $substore })([]);
     assert.deepEqual(result, [true, false, false]);
     runtimeClosed();
 });

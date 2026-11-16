@@ -39,7 +39,7 @@ Fork 仓库，在 GitHub Actions 配置：
 ## 功能与边界
 
 - QuickJS 支持 async/await、Buffer、lodash、URL、Fetch、Web Streams、Web Crypto 和异步宿主回调；每次执行有独立的时限、内存、栈和资源数量限制。
-- 脚本中的 `$substore.env.isWorker` 为 `true`；`isSurge` 和 `isNode` 均为 `false`。
+- 脚本使用 Surge 兼容环境：`$substore.env.isSurge` 为 `true`，`isNode` 为 `false`。
 - `require` 和动态 `import` 仅支持 lodash、buffer、url、crypto、events、stream/web 白名单，不支持本地文件、任意 npm 包或本地代理内核。
 - DNS 可使用上游 DoH；不提供任意 UDP DNS。
 - GeoIP 从配置的 MMDB URL 按需加载，数据库和订阅数据由单库持久化；加载失败会重试，不替换有效的旧 reader。
